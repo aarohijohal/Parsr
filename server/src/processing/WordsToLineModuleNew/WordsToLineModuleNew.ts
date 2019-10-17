@@ -77,7 +77,7 @@ export class WordsToLineModuleNew extends Module<Options> {
 			const words: Word[] = page
 				.getElementsOfType<Word>(Word, false)
 				.filter(Element.hasBoundingBox)
-				.sort(this.sortWordsByTopLeftPosition);
+				.sort(this.sortWordsByTopLeftPosition(opt));
 
 			const otherPageElements: Element[] = page.elements.filter(
 				element => !(element instanceof Word),
@@ -99,13 +99,15 @@ export class WordsToLineModuleNew extends Module<Options> {
 		sorts the words by top-left order, without considering columns or any special reading method.
 		if two words have a minimal difference in their top positions, I will assume that they are at the same line
 	*/
-	private sortWordsByTopLeftPosition(wordA: Word, wordB: Word): number {
-		const verticalDiff = Math.abs(wordA.box.top - wordB.box.top);
+	private sortWordsByTopLeftPosition(options: Options): (a: Word, b: Word) => number {
+		return (wordA: Word, wordB: Word) => {
+			const verticalDiff = Math.abs(wordA.box.top - wordB.box.top);
 
-		if (verticalDiff > wordA.box.height * 0.2) {
-			return wordA.box.top - wordB.box.top;
-		}
-		return wordA.box.left - wordB.box.left;
+			if (verticalDiff > wordA.box.height * options.topUncertainty.value) {
+				return wordA.box.top - wordB.box.top;
+			}
+			return wordA.box.left - wordB.box.left;
+		};
 	}
 
 	private joinWordsInElements(elements: Element[], options: Options) {
