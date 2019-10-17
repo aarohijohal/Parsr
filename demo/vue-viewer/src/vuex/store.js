@@ -105,30 +105,18 @@ export default new Vuex.Store({
 				],
 				'link-detection',
 				[
-					'words-to-line',
+					'words-to-line-new',
 					{
-						lineHeightUncertainty: {
-							value: 0.2,
-							range: {
-								min: 0.0,
-								max: 1.0,
-							},
-						},
 						topUncertainty: {
-							value: 0.4,
-							range: {
-								min: 0.0,
-								max: 1.0,
-							},
+							value: 0.5,
+							range: { min: 0.0, max: 1.0 },
 						},
-						maximumSpaceBetweenWords: {
-							value: 100,
-							range: {
-								min: 0,
-								max: 100,
-							},
+						maxAverageSpaceCount: {
+							value: 3,
 						},
-						mergeTableElements: { value: false, range: [true, false] },
+						maxSpacesBetweenWords: {
+							value: 14,
+						},
 					},
 				],
 				[
