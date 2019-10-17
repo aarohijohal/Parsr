@@ -105,7 +105,7 @@ export class WordsToLineModuleNew extends Module<Options> {
 		if (verticalDiff > wordA.box.height * 0.2) {
 			return wordA.box.top - wordB.box.top;
 		}
-		return wordB.box.left - wordA.box.left;
+		return wordA.box.left - wordB.box.left;
 	}
 
 	private joinWordsInElements(elements: Element[], options: Options) {
