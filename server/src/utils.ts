@@ -680,9 +680,10 @@ export function getExecLocationCommandOnSystem(): string {
  * @param executableName the name of the executable to be located
  */
 export function getCommandLocationOnSystem(executableName: string): string {
-	const res: string = spawnSync(getExecLocationCommandOnSystem(), [
-		executableName,
-	]).stdout.toString();
+	let res: string = spawnSync(getExecLocationCommandOnSystem(), [executableName]).stdout;
+	if (res) {
+		res = res.toString();
+	}
 	if (res.slice(res.length - 1, res.length) === '\n') {
 		return res.slice(0, res.length - 1);
 	} else {
