@@ -150,7 +150,7 @@ function repairPdf(filePath: string) {
 	return new Promise<string>(resolve => {
 		const mutoolSpawnPath = spawnSync(utils.getExecLocationCommandOnSystem(), ['mutool']);
 		let mutoolPath = '';
-		if (mutoolSpawnPath) {
+		if (mutoolSpawnPath.output) {
 			mutoolPath = mutoolSpawnPath.output.join('');
 		}
 		if (mutoolPath === '' || (/^win/i.test(os.platform()) && /no mutool in/.test(mutoolPath))) {
