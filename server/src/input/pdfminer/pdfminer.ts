@@ -55,6 +55,7 @@ export function execute(pdfInputFile: string): Promise<Document> {
 			} else {
 				logger.debug(`pdf2txt was found at ${pdf2txtLocation}`);
 			}
+			logger.info(`pdf2txt was found at ${pdf2txtLocation}`);
 			logger.info(`Extracting PDF contents using pdfminer...`);
 			logger.debug(
 				`${pdf2txtLocation} ${[
@@ -350,16 +351,16 @@ function ncolourToHex(color: string) {
  * @param filePath The absolute filename and path of the pdf file to be repaired.
  */
 function repairPdf(filePath: string) {
-	logger.info('---------------------------');
-	logger.info('REPAIR PDF');
-	logger.info('---------------------------');
+	console.log('---------------------------');
+	console.log('REPAIR PDF');
+	console.log('---------------------------');
 	return new Promise<string>(resolve => {
 		const mutoolPath = utils.getCommandLocationOnSystem('mutool');
-		logger.info('---------------------------');
-		logger.info('MUTOOLPATH');
-		logger.info(mutoolPath);
+		console.log('---------------------------');
+		console.log('MUTOOLPATH');
+		console.log('(' + mutoolPath + ')');
 		if (mutoolPath === '' || (/^win/i.test(os.platform()) && /no mutool in/.test(mutoolPath))) {
-			logger.info('MuPDF not installed !! Skip clean PDF.');
+			console.log('MuPDF not installed !! Skip clean PDF.');
 			resolve(filePath);
 		} else {
 			const pdfOutputFile = utils.getTemporaryFile('.pdf');
