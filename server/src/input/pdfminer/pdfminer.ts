@@ -355,8 +355,11 @@ function repairPdf(filePath: string) {
 	logger.info('---------------------------');
 	return new Promise<string>(resolve => {
 		const mutoolPath = utils.getCommandLocationOnSystem('mutool');
+		logger.info('---------------------------');
+		logger.info('MUTOOLPATH');
+		logger.info(mutoolPath);
 		if (mutoolPath === '' || (/^win/i.test(os.platform()) && /no mutool in/.test(mutoolPath))) {
-			logger.warn('MuPDF not installed !! Skip clean PDF.');
+			logger.info('MuPDF not installed !! Skip clean PDF.');
 			resolve(filePath);
 		} else {
 			const pdfOutputFile = utils.getTemporaryFile('.pdf');
