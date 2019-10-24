@@ -52,6 +52,8 @@ export function execute(pdfInputFile: string): Promise<Document> {
 				logger.debug(
 					`Unable to find pdf2txt, the pdfminer executable on the system. Are you sure it is installed?`,
 				);
+				rejectDocument('Unable to find PdfMiner');
+				return;
 			} else {
 				logger.debug(`pdf2txt was found at ${pdf2txtLocation}`);
 			}
