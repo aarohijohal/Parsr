@@ -672,7 +672,7 @@ export function findMostCommonFont(fonts: Font[]): Font | undefined {
  * on linux/unix machines, this is 'which', on windows machines, it is 'where'.
  */
 export function getExecLocationCommandOnSystem(): string {
-	return os.platform() === 'win32' ? 'where' : 'which';
+	return os.platform() === 'win32' ? 'where /r \\' : 'which';
 }
 
 /**
@@ -680,10 +680,11 @@ export function getExecLocationCommandOnSystem(): string {
  * @param executableName the name of the executable to be located
  */
 export function getCommandLocationOnSystem(executableName: string): string {
-	const res: string = spawnSync(getExecLocationCommandOnSystem(), [executableName]).stdout;
+	let res: string = spawnSync(getExecLocationCommandOnSystem(), [executableName]).stdout;
 	if (!res) {
 		return '';
 	}
+	res = res.toString();
 	if (res.slice(res.length - 1, res.length) === '\n') {
 		return res.slice(0, res.length - 1);
 	} else {
