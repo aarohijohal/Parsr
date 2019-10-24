@@ -148,9 +148,11 @@ function findOrCreate(newFont: Font, fonts: Font[]): Font {
  */
 function repairPdf(filePath: string) {
 	return new Promise<string>(resolve => {
-		const mutoolPath = spawnSync(utils.getExecLocationCommandOnSystem(), ['mutool']).output.join(
-			'',
-		);
+		const mutoolSpawnPath = spawnSync(utils.getExecLocationCommandOnSystem(), ['mutool']);
+		let mutoolPath = '';
+		if (mutoolSpawnPath) {
+			mutoolPath = mutoolSpawnPath.output.join('');
+		}
 		if (mutoolPath === '' || (/^win/i.test(os.platform()) && /no mutool in/.test(mutoolPath))) {
 			logger.warn('MuPDF not installed !! Skip clean PDF.');
 			resolve(filePath);

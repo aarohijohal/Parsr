@@ -27,9 +27,11 @@ import logger from '../utils/Logger';
  */
 export function extractFonts(pdfInputFile: string): Promise<void> {
 	return new Promise<void>((resolve, reject) => {
-		const mutoolPath = spawnSync(utils.getExecLocationCommandOnSystem(), ['mutool']).output.join(
-			'',
-		);
+		const mutoolSpawnPath = spawnSync(utils.getExecLocationCommandOnSystem(), ['mutool']);
+		let mutoolPath = '';
+		if (mutoolSpawnPath) {
+			mutoolPath = mutoolSpawnPath.output.join('');
+		}
 		if (mutoolPath === '' || (/^win/i.test(os.platform()) && /no mutool in/.test(mutoolPath))) {
 			logger.warn('MuPDF not installed !! Skip fonts extraction.');
 			resolve();
