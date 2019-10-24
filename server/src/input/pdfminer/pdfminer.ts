@@ -350,6 +350,9 @@ function ncolourToHex(color: string) {
  * @param filePath The absolute filename and path of the pdf file to be repaired.
  */
 function repairPdf(filePath: string) {
+	logger.info('---------------------------');
+	logger.info('REPAIR PDF');
+	logger.info('---------------------------');
 	return new Promise<string>(resolve => {
 		const mutoolPath = utils.getCommandLocationOnSystem('mutool');
 		if (mutoolPath === '' || (/^win/i.test(os.platform()) && /no mutool in/.test(mutoolPath))) {
