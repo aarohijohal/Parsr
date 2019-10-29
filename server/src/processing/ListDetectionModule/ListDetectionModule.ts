@@ -165,8 +165,9 @@ export class ListDetectionModule extends Module {
 			const firstLine: Line = para.content[0];
 			if (this.detectKindOfListItem(firstLine) !== 'none') {
 				const itemIndicator: string = firstLine.content.splice(0, 1)[0].toString();
-				// TODO: Fit line box to words inside it
-				// firstLine.box.left = firstLine.content[0].box.left;
+				const lineWidthReduced = Math.abs(firstLine.left - firstLine.content[0].left);
+				firstLine.left = firstLine.content[0].box.left;
+				firstLine.width = firstLine.width - lineWidthReduced;
 				if (list.isOrdered) {
 					itemNumber = parseFloat(itemIndicator.replace(/[^0-9]/g, ''));
 					if (index === 0) {
