@@ -1,3 +1,5 @@
+![](./docs/assets/LogoParsr.png)
+
 [![Build Status](https://cloud.drone.io/api/badges/axa-group/Parsr/status.svg)](https://cloud.drone.io/axa-group/Parsr)
 
 # Parsr: Turn your documents into data!

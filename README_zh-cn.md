@@ -1,3 +1,5 @@
+![](./docs/assets/LogoParsr.png)
+
 [![Build Status](https://cloud.drone.io/api/badges/axa-group/Parsr/status.svg)](https://cloud.drone.io/axa-group/Parsr)
 
 # Parsr: 从文档到数据，一步到位!

@@ -1,7 +1,7 @@
 <template>
 	<div id="nav">
 		<span class="brand">
-			<img style="height:50px;" :src="logo" />
+			<img :src="logo" />
 		</span>
 
 		<router-link to="/upload">
