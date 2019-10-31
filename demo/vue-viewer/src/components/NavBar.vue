@@ -1,7 +1,7 @@
 <template>
 	<div id="nav">
 		<span class="brand">
-			<span>Parsr</span>
+			<img style="height:50px;" :src="logo" />
 		</span>
 
 		<router-link to="/upload">
@@ -28,69 +28,71 @@
 import NavItem from '@/components/NavBarItem.vue';
 import SearchIcon from '@/assets/search.png';
 import GuideIcon from '@/assets/guide.png';
+import Logo from '@/assets/Logo.png';
 
 export default {
-	components: { NavItem },
-	data() {
-		return {
-			searchIcon: SearchIcon,
-			guideIcon: GuideIcon,
-		};
-	},
-	methods: {
-		searchClick() {
-			console.log('searchClick');
-		},
-		guideClick() {
-			console.log('guideClick');
-		},
-	},
+  components: { NavItem },
+  data() {
+    return {
+      searchIcon: SearchIcon,
+      guideIcon: GuideIcon,
+      logo: Logo,
+    };
+  },
+  methods: {
+    searchClick() {
+      console.log('searchClick');
+    },
+    guideClick() {
+      console.log('guideClick');
+    },
+  },
 };
 </script>
 <style lang="scss" scoped>
 #nav .brand {
-	margin-bottom: 8px;
+  margin-bottom: 8px;
 }
 #nav .brand span {
-	font-weight: bold;
-	font-size: 2em;
-	color: #00008a;
-	margin: 0 0 0 0.3em;
+  font-weight: bold;
+  font-size: 2em;
+  color: #00008a;
+  margin: 0 0 0 0.3em;
 }
 #nav .brand * {
-	vertical-align: middle;
+  vertical-align: middle;
 }
 #nav a {
-	font-weight: bold;
-	font-size: 1.2em;
-	color: #aeaeae;
-	margin: 0 0.8em 0 0.4em;
-	padding: 1em 0 0.6em 0;
-	text-decoration: none;
-	border-bottom: 3px solid transparent;
+  font-weight: bold;
+  font-size: 1.2em;
+  color: #aeaeae;
+  margin: 0 0.8em 0 0.4em;
+  padding: 1em 0 0.6em 0;
+  text-decoration: none;
+  border-bottom: 3px solid transparent;
 }
 
 #nav a:first-of-type {
-	margin-left: 2em;
+  margin-left: 2em;
 }
 
 #nav a.router-link-exact-active {
-	color: #00008a;
-	border-bottom: 3px solid #00008a;
+  color: #00008a;
+  border-bottom: 3px solid #00008a;
 }
 #nav {
-	display: flex;
-	align-items: center;
-	padding: 8px 8px 0 8px;
+  display: flex;
+  align-items: center;
+  padding: 8px 8px 0 8px;
 }
 
 #nav .navButton {
-	color: #aeaeae;
-	font-size: 0.8em;
-	margin-left: 0;
-	margin-right: 1em;
+  color: #aeaeae;
+  font-size: 0.8em;
+  margin-left: 0;
+  margin-right: 1em;
 }
 #nav .navButton:first-of-type {
-	margin-left: auto;
+  margin-left: auto;
 }
 </style>
