@@ -1,4 +1,6 @@
-![](./docs/assets/LogoParsr.png)
+<p align='center'>
+  <img src="./docs/assets/LogoParsr.png">
+</p>
 
 [![Build Status](https://cloud.drone.io/api/badges/axa-group/Parsr/status.svg)](https://cloud.drone.io/axa-group/Parsr)
 
