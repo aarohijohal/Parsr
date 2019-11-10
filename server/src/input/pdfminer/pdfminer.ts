@@ -420,3 +420,50 @@ function repairPdf(filePath: string) {
     }
   });
 }
+
+/*
+  runs the 'dumppdf.py' script and returns a JSON with all the metadata found in the file
+*/
+export function getFileMetadata(pdfFilePath: string): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const xmlOutputFile: string = utils.getTemporaryFile('.xml');
+    const pythonLocation: string = utils.getPythonLocation();
+    const dumppdfLocation: string = utils.getDumppdfLocation();
+    if (dumppdfLocation === "" || pythonLocation === "") {
+      reject(`Could not find the necessary libraries..`);
+    }
+
+    logger.info(`Extracting metadata with pdfminer's dumppdf.py tool...`);
+
+    const dumppdfArguments = [dumppdfLocation, '-a', '-o', xmlOutputFile, pdfFilePath];
+
+    logger.debug(`${pythonLocation} ${dumppdfArguments.join(' ')}`);
+
+    if (!fs.existsSync(xmlOutputFile)) {
+      fs.appendFileSync(xmlOutputFile, '');
+    }
+
+    const dumppdf = spawn(pythonLocation, dumppdfArguments);
+
+    dumppdf.stderr.on('data', data => {
+      logger.error('dumppdf error:', data.toString('utf8'));
+      reject(data.toString('utf8'));
+    });
+
+    dumppdf.on('close', async code => {
+      if (code === 0) {
+        const xml: string = fs.readFileSync(xmlOutputFile, 'utf8');
+        try {
+          logger.debug(`Converting dumppdf's XML output to JS object..`);
+          utils.parseXmlToObject(xml).then((obj: any) => {
+            resolve(obj);
+          });
+        } catch (err) {
+          reject(`parseXml failed: ${err}`);
+        }
+      } else {
+        reject(`dumppdf return code is ${code}`);
+      }
+    });
+  });
+}
