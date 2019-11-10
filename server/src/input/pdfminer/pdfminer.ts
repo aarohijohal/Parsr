@@ -199,6 +199,12 @@ function getValidCharacter(character: string): string {
   return RegExp(/\(cid:/gm).test(character) ? '?' : character;
 }
 
+/**
+ * Interprets images from a figure object received via pdfminer's pdf2txt.py output
+ * @param fig The incoming figure object from pdfminer
+ * @param pageHeight The height of the page (for scaling)
+ * @param scalingFactor The factor by which the bounding boxes are to be scaled
+ */
 function interpretImages(
   fig: PdfminerFigure,
   pageHeight: number,
