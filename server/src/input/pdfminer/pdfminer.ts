@@ -40,11 +40,13 @@ import logger from '../../utils/Logger';
  * the pdfminer tool's output provides. This function spawns the externally existing pdfminer tool.
  *
  * @param pdfInputFile The path including the name of the pdf file for input.
+ * @param imgsPhysicalLocation The location where physical images are stored
  * @returns The promise of a valid document (in the format DocumentRepresentation).
  */
-export function execute(pdfInputFile: string): Promise<Document> {
+export function execute(pdfInputFile: string, imgsPhysicalLocation: string): Promise<Document> {
   return new Promise<Document>((resolveDocument, rejectDocument) => {
     return repairPdf(pdfInputFile).then((repairedPdf: string) => {
+      // temporary XML output filename
       const xmlOutputFile: string = utils.getTemporaryFile('.xml');
 
       // find python
@@ -90,10 +92,35 @@ export function execute(pdfInputFile: string): Promise<Document> {
           const xml: string = fs.readFileSync(xmlOutputFile, 'utf8');
           try {
             logger.debug(`Converting pdfminer's XML output to JS object..`);
-            utils.parseXmlToObject(xml, { attrkey: '_attr' }).then((obj: any) => {
-              const pages: Page[] = [];
-              obj.pages.page.forEach(pageObj => pages.push(getPage(pageObj)));
-              resolveDocument(new Document(pages, repairedPdf));
+            utils.parseXmlToObject(xml, { attrkey: '_attr' }).then(async (obj: any) => {
+
+            // get the metadataobject
+            const { pdf: { object: metadataObj } } = await getFileMetadata(repairedPdf);
+
+            // get the image resources (if any)
+            let xObjects: any = {};
+            try {
+              const resourcesDict = metadataObj
+              .filter(o => o.dict)
+              .map(p => p.dict[0])
+              .filter(q => q.key.includes('Resources'))[0];
+              const resources = resourcesDict.value[resourcesDict.key.indexOf('Resources')].dict[0];
+              xObjects = resources.value[resources.key.indexOf('XObject')].dict[0];
+            } catch (err) {
+              logger.warn(`No resources found in the dump. Could not get image information out: ${err}`);
+            }
+
+            // treat pages
+            resolveDocument(
+              new Document(
+                obj.pages.page.map((pageObj: PdfminerPage) => getPage(
+                  pageObj,
+                  xObjects,
+                  imgsPhysicalLocation),
+                ),
+                repairedPdf,
+              ),
+            );
             });
           } catch (err) {
             rejectDocument(`parseXml failed: ${err}`);
@@ -107,7 +134,7 @@ export function execute(pdfInputFile: string): Promise<Document> {
   });
 }
 
-function getPage(pageObj: PdfminerPage): Page {
+function getPage(pageObj: PdfminerPage, metaDataObj: object, imgsPhysicalLocation: string): Page {
   const boxValues: number[] = pageObj._attr.bbox.split(',').map(v => parseFloat(v));
   const pageBBox: BoundingBox = new BoundingBox(
     boxValues[0],
@@ -131,7 +158,7 @@ function getPage(pageObj: PdfminerPage): Page {
   if (pageObj.figure !== undefined) {
     pageObj.figure.forEach(fig => {
       if (fig.image !== undefined) {
-        elements = [...elements, ...interpretImages(fig, pageBBox.height)];
+        elements = [...elements, ...interpretImages(fig, metaDataObj, imgsPhysicalLocation, pageBBox.height)];
       }
       if (fig.text !== undefined) {
         elements = [...elements, ...breakLineIntoWords(fig.text, ',', pageBBox.height)];
@@ -207,17 +234,42 @@ function getValidCharacter(character: string): string {
  */
 function interpretImages(
   fig: PdfminerFigure,
+  xObjects: any,
+  imgsPhysicalLocation: string,
   pageHeight: number,
   scalingFactor: number = 1,
 ): Image[] {
-  return fig.image.map(
-    (_img: PdfminerImage) =>
-      new Image(
-        getBoundingBox(fig._attr.bbox, ',', pageHeight, scalingFactor),
-        "",  // TODO: to be filled with the location of the image once resolved
-      ),
-  );
+  logger.debug(`-------------- imgsPhysicalLocation is : ${imgsPhysicalLocation}`);
+  logger.debug(`-------------- xObjects are : ${utils.prettifyObject(xObjects)}`);
+  const figureName: string = fig._attr.name !== undefined ? fig._attr.name : "";
+  const imageId: number =
+    xObjects !== undefined && xObjects.key.includes(figureName)
+      ? parseFloat(xObjects.value[xObjects.key.indexOf(figureName)].ref[0].$.id) : undefined;
+  logger.debug(`-------------- xObject for fig is : ${imageId}`);
+  return fig.image.map((_img: PdfminerImage) => {
+    logger.debug(`-------------------- figure name is : ${figureName}`);
+    return new Image(
+      getBoundingBox(fig._attr.bbox, ',', pageHeight, scalingFactor),
+      "",  // TODO: to be filled with the location of the image once resolved
+    );
+  });
 }
+
+// <value>
+// <dict size="1">
+//     <key>Image17</key>
+//     <value>
+//         <ref id="37" />
+//     </value>
+// </dict>
+// </value>
+// </dict>
+// </value>
+
+// <value>
+// <literal>Page</literal>
+// </value>
+// </dict>
 
 function breakLineIntoWords(
   texts: PdfminerText[],
