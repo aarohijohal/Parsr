@@ -94,28 +94,16 @@ export function execute(pdfInputFile: string, imgsPhysicalLocation: string): Pro
             logger.debug(`Converting pdfminer's XML output to JS object..`);
             utils.parseXmlToObject(xml, { attrkey: '_attr' }).then(async (obj: any) => {
 
-            // get the metadataobject
+            // get the metadataobject and images ref table
             const { pdf: { object: metadataObj } } = await getFileMetadata(repairedPdf);
-
-            // get the image resources (if any)
-            let xObjects: any = {};
-            try {
-              const resourcesDict = metadataObj
-              .filter(o => o.dict)
-              .map(p => p.dict[0])
-              .filter(q => q.key.includes('Resources'))[0];
-              const resources = resourcesDict.value[resourcesDict.key.indexOf('Resources')].dict[0];
-              xObjects = resources.value[resources.key.indexOf('XObject')].dict[0];
-            } catch (err) {
-              logger.warn(`No resources found in the dump. Could not get image information out: ${err}`);
-            }
+            const imageRefTable: object = getImagesAndReferences(metadataObj);
 
             // treat pages
             resolveDocument(
               new Document(
                 obj.pages.page.map((pageObj: PdfminerPage) => getPage(
                   pageObj,
-                  xObjects,
+                  imageRefTable,
                   imgsPhysicalLocation),
                 ),
                 repairedPdf,
@@ -134,7 +122,7 @@ export function execute(pdfInputFile: string, imgsPhysicalLocation: string): Pro
   });
 }
 
-function getPage(pageObj: PdfminerPage, metaDataObj: object, imgsPhysicalLocation: string): Page {
+function getPage(pageObj: PdfminerPage, imgsRefTable: any, imgsPhysicalLocation: string): Page {
   const boxValues: number[] = pageObj._attr.bbox.split(',').map(v => parseFloat(v));
   const pageBBox: BoundingBox = new BoundingBox(
     boxValues[0],
@@ -158,7 +146,7 @@ function getPage(pageObj: PdfminerPage, metaDataObj: object, imgsPhysicalLocatio
   if (pageObj.figure !== undefined) {
     pageObj.figure.forEach(fig => {
       if (fig.image !== undefined) {
-        elements = [...elements, ...interpretImages(fig, metaDataObj, imgsPhysicalLocation, pageBBox.height)];
+        elements = [...elements, ...interpretImages(fig, imgsRefTable, imgsPhysicalLocation, pageBBox.height)];
       }
       if (fig.text !== undefined) {
         elements = [...elements, ...breakLineIntoWords(fig.text, ',', pageBBox.height)];
@@ -234,25 +222,70 @@ function getValidCharacter(character: string): string {
  */
 function interpretImages(
   fig: PdfminerFigure,
-  xObjects: any,
+  imgsRefTable: any,
   imgsPhysicalLocation: string,
   pageHeight: number,
   scalingFactor: number = 1,
 ): Image[] {
-  logger.debug(`-------------- imgsPhysicalLocation is : ${imgsPhysicalLocation}`);
-  logger.debug(`-------------- xObjects are : ${utils.prettifyObject(xObjects)}`);
   const figureName: string = fig._attr.name !== undefined ? fig._attr.name : "";
-  const imageId: number =
-    xObjects !== undefined && xObjects.key.includes(figureName)
-      ? parseFloat(xObjects.value[xObjects.key.indexOf(figureName)].ref[0].$.id) : undefined;
-  logger.debug(`-------------- xObject for fig is : ${imageId}`);
+  let imgFilenameRef: string;
+  if (figureName !== "" && imgsRefTable.mode !== 0) {
+    imgFilenameRef = imgsRefTable.mode === 1  ? figureName.match(/(\d+)/)[0] : imgsRefTable[figureName];
+    logger.debug(`Image ${figureName}'s file name reference is ${imgFilenameRef}`);
+    const files: string[] = fs.readdirSync(imgsPhysicalLocation).filter(fn => fn.slice(fn.length - 4, 4) === '.png');
+    logger.debug(`all the png files: ${files}`);
+    // TODO find the appropriate file here
+  } else {
+    logger.debug(`don't have enough information to find a physical file for image`);
+  }
   return fig.image.map((_img: PdfminerImage) => {
-    logger.debug(`-------------------- figure name is : ${figureName}`);
     return new Image(
       getBoundingBox(fig._attr.bbox, ',', pageHeight, scalingFactor),
-      "",  // TODO: to be filled with the location of the image once resolved
+      imgFilenameRef,
     );
   });
+}
+
+/**
+ * Extracts image names and reference ids of each object from the dump
+ * The resulting modes are:
+ *  0: nothing found.
+ *  1: the files are probably named by their figureName ID
+ *  2: the files are probably named by their reference ID
+ * @param metaDataObj the meta data object coming in from dumppdf.py
+ */
+function getImagesAndReferences(metaDataObj: any): any {
+  let xObjects: any = {};
+  const result: any = {
+    mode: 0,
+  };
+  try {
+    const allDicts = metaDataObj.filter(o => o.dict).map(p => p.dict[0]);
+    const resourcesDicts = allDicts.filter(q => q.key && q.key.includes('Resources'));
+    const resources = resourcesDicts.map(rd => rd.value[rd.key.indexOf('Resources')].dict[0]);
+    xObjects = resources.filter(q => q.key && q.key.includes('XObject'))
+    .map(d => d.value[d.key.indexOf('XObject')].dict[0]);
+    result.mode = 1;
+  } catch (err1) {
+    logger.warn(`No resources element found in the dump. Trying to look into key values directly...`);
+    try {
+      const allDicts = metaDataObj.filter(o => o.dict).map(p => p.dict[0]);
+      xObjects = allDicts.filter(q => q.key && q.key.includes('XObject'))
+      .map(d => d.value[d.key.indexOf('XObject')].dict[0]);
+      result.mode = 2;
+    } catch (err2) {
+      logger.warn(`No resources found in the key values either. Abandoning image extraction attempt.`);
+      return result;
+    }
+  }
+  if (xObjects) {
+    xObjects.forEach(xObj => {
+      xObj.key.forEach(key => {
+        result[key] = xObj.value[xObj.key.indexOf(key)].ref[0].$.id;
+      });
+    });
+  }
+  return result;
 }
 
 // <value>
@@ -443,9 +476,7 @@ function repairPdf(filePath: string) {
     if (process.status === 0) {
       logger.info(`qpdf repair successfully performed on file ${filePath}. New file at: ${qpdfOutputFile}`);
     } else {
-      logger.warn(
-        'qpdf error for file ${filePath}:', process.status, process.stdout.toString(), process.stderr.toString(),
-      );
+      logger.warn(`qpdf decryption could not be performed on the file ${filePath}:`);
       qpdfOutputFile = filePath;
     }
   } else {
