@@ -17,6 +17,7 @@
 import { spawn, spawnSync } from 'child_process';
 import * as fs from 'fs';
 
+import * as path from 'path';
 import {
   BoundingBox,
   Character,
@@ -96,15 +97,16 @@ export function execute(pdfInputFile: string, imgsPhysicalLocation: string): Pro
 
             // get the metadataobject and images ref table
             const { pdf: { object: metadataObj } } = await getFileMetadata(repairedPdf);
-            const imageRefTable: object = getImagesAndReferences(metadataObj);
+            const imgRefTable: object = getImgsAndRefs(metadataObj);
+            const imgsIdFilenameMap: object = getImgsIdFilenameMap(imgsPhysicalLocation);
 
             // treat pages
             resolveDocument(
               new Document(
                 obj.pages.page.map((pageObj: PdfminerPage) => getPage(
                   pageObj,
-                  imageRefTable,
-                  imgsPhysicalLocation),
+                  imgRefTable,
+                  imgsIdFilenameMap),
                 ),
                 repairedPdf,
               ),
@@ -122,7 +124,7 @@ export function execute(pdfInputFile: string, imgsPhysicalLocation: string): Pro
   });
 }
 
-function getPage(pageObj: PdfminerPage, imgsRefTable: any, imgsPhysicalLocation: string): Page {
+function getPage(pageObj: PdfminerPage, imgsRefTable: object, imgsIdFilenameMap: object): Page {
   const boxValues: number[] = pageObj._attr.bbox.split(',').map(v => parseFloat(v));
   const pageBBox: BoundingBox = new BoundingBox(
     boxValues[0],
@@ -146,7 +148,7 @@ function getPage(pageObj: PdfminerPage, imgsRefTable: any, imgsPhysicalLocation:
   if (pageObj.figure !== undefined) {
     pageObj.figure.forEach(fig => {
       if (fig.image !== undefined) {
-        elements = [...elements, ...interpretImages(fig, imgsRefTable, imgsPhysicalLocation, pageBBox.height)];
+        elements = [...elements, ...interpretImages(fig, imgsRefTable, imgsIdFilenameMap, pageBBox.height)];
       }
       if (fig.text !== undefined) {
         elements = [...elements, ...breakLineIntoWords(fig.text, ',', pageBBox.height)];
@@ -223,27 +225,42 @@ function getValidCharacter(character: string): string {
 function interpretImages(
   fig: PdfminerFigure,
   imgsRefTable: any,
-  imgsPhysicalLocation: string,
+  idFilenameMap: object,
   pageHeight: number,
   scalingFactor: number = 1,
 ): Image[] {
   const figureName: string = fig._attr.name !== undefined ? fig._attr.name : "";
-  let imgFilenameRef: string;
+  let imgFilenameRef: string = "";
+  let figureFilename: string = "";
   if (figureName !== "" && imgsRefTable.mode !== 0) {
     imgFilenameRef = imgsRefTable.mode === 1  ? figureName.match(/(\d+)/)[0] : imgsRefTable[figureName];
-    logger.debug(`Image ${figureName}'s file name reference is ${imgFilenameRef}`);
-    const files: string[] = fs.readdirSync(imgsPhysicalLocation).filter(fn => fn.slice(fn.length - 4, 4) === '.png');
-    logger.debug(`all the png files: ${files}`);
-    // TODO find the appropriate file here
+    figureFilename = idFilenameMap[imgFilenameRef];
   } else {
     logger.debug(`don't have enough information to find a physical file for image`);
   }
   return fig.image.map((_img: PdfminerImage) => {
     return new Image(
       getBoundingBox(fig._attr.bbox, ',', pageHeight, scalingFactor),
-      imgFilenameRef,
+      figureFilename,
     );
   });
+}
+
+/**
+ * Returns id->filename map for all images
+ * @param imgsPhysicalLocation physical location where all images are stored
+ * @param imgFileExtensions the extensions of the image files to be accepted
+ */
+function getImgsIdFilenameMap(imgsPhysicalLocation: string, imgFileExtensions: string[] = ['png', 'bmp', 'jpg']) {
+  const idFilenameMap: object = {};
+  const imgFiles: string[] = fs.readdirSync(imgsPhysicalLocation)
+  .filter(fileName => imgFileExtensions.includes(new RegExp(/(?:\.([^.]+))?$/).exec(fileName)[1]));
+  imgFiles.map(fileName => {
+    const id: string = parseFloat(fileName.match(/(\d+)/)[0]).toString();
+    const absFilePath: string = path.join(imgsPhysicalLocation, fileName);
+    idFilenameMap[id] = absFilePath;
+  });
+  return idFilenameMap;
 }
 
 /**
@@ -254,7 +271,7 @@ function interpretImages(
  *  2: the files are probably named by their reference ID
  * @param metaDataObj the meta data object coming in from dumppdf.py
  */
-function getImagesAndReferences(metaDataObj: any): any {
+function getImgsAndRefs(metaDataObj: any): any {
   let xObjects: any = {};
   const result: any = {
     mode: 0,
@@ -476,7 +493,7 @@ function repairPdf(filePath: string) {
     if (process.status === 0) {
       logger.info(`qpdf repair successfully performed on file ${filePath}. New file at: ${qpdfOutputFile}`);
     } else {
-      logger.warn(`qpdf decryption could not be performed on the file ${filePath}:`);
+      logger.warn(`qpdf decryption could not be performed on the file ${filePath}`);
       qpdfOutputFile = filePath;
     }
   } else {
