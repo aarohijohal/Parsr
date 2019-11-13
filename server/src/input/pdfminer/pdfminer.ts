@@ -231,17 +231,17 @@ function interpretImages(
 ): Image[] {
   const figureName: string = fig._attr.name !== undefined ? fig._attr.name : "";
   let imgFilenameRef: string = "";
-  let figureFilename: string = "";
-  if (figureName !== "" && imgsRefTable.mode !== 0) {
+  let imgFileName: string = "";
+  if (figureName !== "" || imgsRefTable.mode !== 0) {
     imgFilenameRef = imgsRefTable.mode === 1  ? figureName.match(/(\d+)/)[0] : imgsRefTable[figureName];
-    figureFilename = idFilenameMap[imgFilenameRef];
+    imgFileName = idFilenameMap[imgFilenameRef];
   } else {
-    logger.debug(`don't have enough information to find a physical file for image`);
+    logger.warn(`Figure ${figureName}: don't have enough information to find a physical file for image`);
   }
   return fig.image.map((_img: PdfminerImage) => {
     return new Image(
       getBoundingBox(fig._attr.bbox, ',', pageHeight, scalingFactor),
-      figureFilename,
+      imgFileName,
     );
   });
 }
@@ -304,22 +304,6 @@ function getImgsAndRefs(metaDataObj: any): any {
   }
   return result;
 }
-
-// <value>
-// <dict size="1">
-//     <key>Image17</key>
-//     <value>
-//         <ref id="37" />
-//     </value>
-// </dict>
-// </value>
-// </dict>
-// </value>
-
-// <value>
-// <literal>Page</literal>
-// </value>
-// </dict>
 
 function breakLineIntoWords(
   texts: PdfminerText[],
@@ -491,13 +475,13 @@ function repairPdf(filePath: string) {
     const process = spawnSync('qpdf', ['--decrypt', filePath, qpdfOutputFile]);
 
     if (process.status === 0) {
-      logger.info(`qpdf repair successfully performed on file ${filePath}. New file at: ${qpdfOutputFile}`);
+      logger.info(`qpdf decryption successfully performed on file ${filePath}. New file at: ${qpdfOutputFile}`);
     } else {
       logger.warn(`qpdf decryption could not be performed on the file ${filePath}`);
       qpdfOutputFile = filePath;
     }
   } else {
-    logger.warn(`qpdf not found on the system. Not repairing the PDF...`);
+    logger.warn(`qpdf not found on the system. Not decrypting the PDF...`);
     qpdfOutputFile = filePath;
   }
 

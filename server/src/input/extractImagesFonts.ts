@@ -33,7 +33,7 @@ export function extractImagesAndFonts(pdfInputFile: string): Promise<string> {
     } else {
       const extractLocation: string = utils.getMutoolExtractionFolder();
       logger.info(
-        `Extracting images and fonts to ${extractLocation} using command 'mutool extract ${pdfInputFile}'...`,
+        `Extracting images and fonts to ${extractLocation}...`,
       );
       const ret = spawnSync('mutool', ['extract', pdfInputFile], { cwd: extractLocation });
 
