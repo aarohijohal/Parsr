@@ -11,9 +11,9 @@
 |Row Hdr 8   |                   | Column 2         :|: Column 3           |
 
 
-|   |   | Column 1 | |
-| a | b | haha     | |
-|----| :---: | -----
+|   |   | Column 1 |
+| a | b | haha     |
+|----| :---: | ----- |
 | names | tom |
 | names | jerry |
 | film  | cartoon |
