@@ -12,8 +12,7 @@
 
 
 |   |   | Column 1 |
-| a | b | haha     |
 |----| :---: | ----- |
-| names | tom |
-| names | jerry |
-| film  | cartoon |
+| names | tom ||
+| names | jerry ||
+| film  | cartoon ||
