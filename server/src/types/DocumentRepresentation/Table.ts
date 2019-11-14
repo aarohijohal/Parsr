@@ -332,7 +332,7 @@ export class Table extends Element {
     let output: string = '';
     tableArray.forEach((row, index) => {
       row.forEach(cellMDCode => {
-        output += '|' + (cellMDCode != null ? cellMDCode : '');
+        output += '|' + (cellMDCode != null ? ' ' + cellMDCode + ' ' : '');
       });
       output += '|  \n';
       if (index === 0) {
