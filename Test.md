@@ -10,3 +10,7 @@
 |Row Hdr 7   |                   | Column 2         :|: Column 3           | 
 |Row Hdr 8   |                   | Column 2         :|: Column 3           |
 
+
+|   |   | Column 1 | |
+| a | b | haha     | |
+|----
