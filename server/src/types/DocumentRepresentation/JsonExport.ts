@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 AXA Group Operations S.A.
+ * Copyright 2020 AXA Group Operations S.A.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,10 +23,28 @@ export interface JsonExport {
   metadata: JsonMetadata[];
 }
 
+export interface JsonPageRotationCoords {
+  x: number;
+  y: number;
+}
+
+export interface JsonPageRotation {
+  degrees: number;
+  origin: JsonPageRotationCoords;
+  translation: JsonPageRotationCoords;
+}
+
 export interface JsonPage {
   box: JsonBox;
+  rotation?: JsonPageRotation;
   pageNumber: number;
   elements: JsonElement[];
+  margins: {
+    top: number,
+    left: number,
+    bottom: number,
+    right: number,
+  };
 }
 
 export interface JsonBox {
@@ -43,6 +61,9 @@ export interface JsonElement {
   content?: JsonElement[] | string;
   font?: number;
   src?: string;
+  refId?: string;
+  xObjId?: string;
+  xObjExt?: string;
   codeType?: string;
   codeValue?: string;
   conf?: number;
@@ -58,6 +79,8 @@ export interface JsonElement {
   properties?: JsonProperties;
   metadata?: number[];
   level?: number;
+  description?: string;
+  pageNumber?: string;
 }
 
 export type JsonProperties = Properties;
@@ -69,6 +92,7 @@ export interface JsonFont {
   weight: string;
   isItalic: boolean;
   isUnderline: boolean;
+  sizeUnit: string;
   color: Color;
   url?: string;
   scaling?: number;

@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 AXA Group Operations S.A.
+ * Copyright 2020 AXA Group Operations S.A.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,9 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-import { spawn, spawnSync } from 'child_process';
 import * as fs from 'fs';
+import * as XmlStream from 'xml-stream';
 import {
   BoundingBox,
   Character,
@@ -26,11 +25,11 @@ import {
   Page,
   Word,
 } from '../../types/DocumentRepresentation';
+import { Color } from '../../types/DocumentRepresentation/Color';
 import { PdfminerFigure } from '../../types/PdfminerFigure';
-import { PdfminerImage } from '../../types/PdfminerImage';
 import { PdfminerPage } from '../../types/PdfminerPage';
 import { PdfminerText } from '../../types/PdfminerText';
-import * as utils from '../../utils';
+import * as CommandExecuter from '../../utils/CommandExecuter';
 import logger from '../../utils/Logger';
 
 /**
@@ -41,67 +40,150 @@ import logger from '../../utils/Logger';
  * @param pdfInputFile The path including the name of the pdf file for input.
  * @returns The promise of a valid document (in the format DocumentRepresentation).
  */
-export function execute(pdfInputFile: string): Promise<Document> {
-  return new Promise<Document>((resolveDocument, rejectDocument) => {
-    return repairPdf(pdfInputFile).then((repairedPdf: string) => {
-      const xmlOutputFile: string = utils.getTemporaryFile('.xml');
 
-      // find python
-      const pythonLocation: string = utils.getPythonLocation();
-
-      // find pdfminer's pdf2txt.py script
-      const pdf2txtLocation: string = utils.getPdf2txtLocation();
-
-      // If either of the tools could not be found, return an empty document and display warning
-      if (pythonLocation === '' || pdf2txtLocation === '') {
-        rejectDocument(`Could not find the necessary libraries..`);
-      }
-
-      logger.info(`Extracting file contents with pdfminer's pdf2txt.py tool...`);
-
-      const pdf2txtArguments: string[] = [
-        pdf2txtLocation,
-        '-c',
-        'utf-8',
-        '-t',
-        'xml',
-        '-o',
-        xmlOutputFile,
-        repairedPdf,
-      ];
-
-      logger.debug(`${pythonLocation} ${pdf2txtArguments.join(' ')}`);
-
-      if (!fs.existsSync(xmlOutputFile)) {
-        fs.appendFileSync(xmlOutputFile, '');
-      }
-
-      const pdf2txt = spawn(pythonLocation, pdf2txtArguments);
-
-      pdf2txt.stderr.on('data', data => {
-        logger.error('pdfminer error:', data.toString('utf8'));
-      });
-
-      pdf2txt.on('close', pdf2txtReturnCode => {
-        if (pdf2txtReturnCode === 0) {
-          const xml: string = fs.readFileSync(xmlOutputFile, 'utf8');
-          try {
-            logger.debug(`Converting pdfminer's XML output to JS object..`);
-            utils.parseXmlToObject(xml, { attrkey: '_attr' }).then((obj: any) => {
-              const pages: Page[] = [];
-              obj.pages.page.forEach(pageObj => pages.push(getPage(pageObj)));
-              resolveDocument(new Document(pages, repairedPdf));
-            });
-          } catch (err) {
-            rejectDocument(`parseXml failed: ${err}`);
-          }
-        } else {
-          rejectDocument(`pdf2txt return code is ${pdf2txtReturnCode}`);
+export function extractPages(pdfInputFile: string, pages: string): Promise<string> {
+  return new Promise<string>((resolveXml, rejectXml) => {
+    const startTime: number = Date.now();
+    CommandExecuter.pdfMinerExtract(pdfInputFile, pages)
+      .then(xmlOutputPath => {
+        logger.info(`PdfMiner xml: ${(Date.now() - startTime) / 1000}s`);
+        try {
+          resolveXml(xmlOutputPath);
+        } catch (err) {
+          rejectXml(`PdfMiner xml parser failed: ${err}`);
         }
+      })
+      .catch(({ error }) => {
+        rejectXml(`PdfMiner pdf2txt.py error: ${error}`);
       });
-      // return doc;
+  });
+}
+
+export function xmlParser(xmlPath: string): Promise<any> {
+  const startTime: number = Date.now();
+
+  return new Promise<any>((resolve, _reject) => {
+    const fileStream = fs.createReadStream(xmlPath);
+    const xml = new XmlStream(fileStream);
+
+    const allPages: any[] = [];
+    let textBoxes: any[] = [];
+    let textLines: any[] = [];
+    let texts: any[] = [];
+    let figures: any[] = [];
+
+    const recursiveFigures = {
+      ids: [],
+      images: [],
+      texts: [],
+      figures: [],
+      currentFigure: () => {
+        return recursiveFigures.ids[recursiveFigures.ids.length - 1].toString();
+      },
+    };
+
+    const pushWord = (word, array, index = null) => {
+      let element = {};
+      if (word.$text != null && word.$ != null) {
+        element = { _: word.$text.toString(), _attr: word.$ };
+      } else if (word.$ != null) {
+        element = { _attr: word.$ };
+      }
+      pushElement(element, array, index);
+    };
+
+    const pushElement = (element, array, index = null) => {
+      if (index != null) {
+        array[index] = array[index] || [];
+        array[index].push(element);
+      } else {
+        array = array || [];
+        array.push(element);
+      }
+    };
+
+    xml.on('endElement: page > textbox > textline > text', word => {
+      pushWord(word, texts);
+    });
+
+    xml.on('endElement: page > textbox > textline', line => {
+      pushElement({ _attr: line.$, text: texts }, textLines);
+      texts = [];
+    });
+
+    xml.on('endElement: page > textbox', line => {
+      pushElement({ _attr: line.$, textline: textLines }, textBoxes);
+      textLines = [];
+    });
+
+    xml.on('startElement: page > figure', figFigure => {
+      pushElement(figFigure.$.name, recursiveFigures.ids);
+    });
+
+    xml.on('startElement: page > figure figure', figFigure => {
+      pushElement(recursiveFigures.currentFigure() + '-' + figFigure.$.name, recursiveFigures.ids);
+    });
+
+    xml.on('startElement: image', figImage => {
+      pushElement({ _attr: figImage.$ }, recursiveFigures.images, recursiveFigures.currentFigure());
+    });
+
+    xml.on('endElement: figure text', figText => {
+      const index = recursiveFigures.currentFigure();
+      pushWord(figText, recursiveFigures.texts, index);
+    });
+
+    xml.on('endElement: page > figure figure', figure => {
+      const current: string = recursiveFigures.currentFigure();
+      const recursiveFigure = {
+        _attr: figure.$,
+        image: recursiveFigures.images[current],
+        text: recursiveFigures.texts[current],
+        figure: recursiveFigures.figures[current],
+      };
+      recursiveFigures.ids.pop();
+      pushElement(recursiveFigure, recursiveFigures.figures, recursiveFigures.currentFigure());
+    });
+
+    xml.on('endElement: page > figure', figure => {
+      pushElement(
+        {
+          _attr: figure.$,
+          image: recursiveFigures.images[figure.$.name],
+          text: recursiveFigures.texts[figure.$.name],
+          figure: recursiveFigures.figures[figure.$.name],
+        },
+        figures,
+      );
+    });
+
+    xml.on('updateElement: page', pageElement => {
+      pushElement({ _attr: pageElement.$, textbox: textBoxes, figure: figures }, allPages);
+      textBoxes = [];
+      figures = [];
+    });
+
+    xml.on('end', () => {
+      logger.info(`Xml to Js: ${(Date.now() - startTime) / 1000}s`);
+      resolve({ pages: { page: allPages } });
     });
   });
+}
+export function jsParser(json: any): Document {
+  const startTime: number = Date.now();
+  const doc: Document = new Document(getPages(json));
+  logger.info(`Js to Document: ${(Date.now() - startTime) / 1000}s`);
+  return doc;
+}
+
+function getPages(jsonObj: any): Page[] {
+  const docPages: Page[] = [];
+  if (Array.isArray(jsonObj.pages.page)) {
+    jsonObj.pages.page.forEach(pageObj => docPages.push(getPage(new PdfminerPage(pageObj))));
+  } else if (jsonObj.pages != null) {
+    docPages.push(getPage(new PdfminerPage(jsonObj.pages.page)));
+  }
+  return docPages;
 }
 
 function getPage(pageObj: PdfminerPage): Page {
@@ -127,8 +209,9 @@ function getPage(pageObj: PdfminerPage): Page {
   // treat figures
   if (pageObj.figure !== undefined) {
     pageObj.figure.forEach(fig => {
-      if (fig.image !== undefined) {
-        elements = [...elements, ...interpretImages(fig, pageBBox.height)];
+      const allFiguresWithImages = getFiguresWithImages(fig);
+      if (allFiguresWithImages.length > 0) {
+        elements = [...elements, ...interpretImages(allFiguresWithImages, pageBBox.height)];
       }
       if (fig.text !== undefined) {
         elements = [...elements, ...breakLineIntoWords(fig.text, ',', pageBBox.height)];
@@ -137,6 +220,24 @@ function getPage(pageObj: PdfminerPage): Page {
   }
 
   return new Page(parseFloat(pageObj._attr.id), elements, pageBBox);
+}
+
+function getFiguresWithImages(figure: PdfminerFigure): PdfminerFigure[] {
+  if (figure.image !== undefined) {
+    return [figure];
+  }
+
+  if (figure.figure !== undefined) {
+    return figure.figure
+      .map(fig => {
+        if (fig !== undefined) {
+          return getFiguresWithImages(fig);
+        }
+        return [];
+      })
+      .reduce((a, b) => a.concat(b), []);
+  }
+  return [];
 }
 
 // Pdfminer's bboxes are of the format: x0, y0, x1, y1. Our BoundingBox dims are as: left, top, width, height
@@ -197,15 +298,16 @@ function getValidCharacter(character: string): string {
 }
 
 function interpretImages(
-  fig: PdfminerFigure,
+  figures: PdfminerFigure[],
   pageHeight: number,
   scalingFactor: number = 1,
 ): Image[] {
-  return fig.image.map(
-    (_img: PdfminerImage) =>
+  return figures.map(
+    fig =>
       new Image(
         getBoundingBox(fig._attr.bbox, ',', pageHeight, scalingFactor),
         '', // TODO: to be filled with the location of the image once resolved
+        fig._attr.name,
       ),
   );
 }
@@ -350,7 +452,11 @@ function isFakeChar(word: PdfminerText, fakeSpacesInLine: boolean): boolean {
   return false;
 }
 
-function ncolourToHex(color: string) {
+function ncolourToHex(color: string): Color {
+  let finalColor: string = '#000000';
+  if (color === undefined) {
+    return finalColor;
+  }
   const rgbToHex = (r, g, b) =>
     '#' +
     [r, g, b]
@@ -360,59 +466,23 @@ function ncolourToHex(color: string) {
       })
       .join('');
 
-  const rgbColor = color
-    .replace('[', '')
-    .replace(']', '')
-    .split(',');
+  const cmykToRGB = (c: number, m: number, y: number, k: number) => {
+    return {
+      r: (1 - c) * (1 - k),
+      g: (1 - m) * (1 - k),
+      b: (1 - y) * (1 - k),
+    };
+  };
 
-  return rgbToHex(rgbColor[0], rgbColor[1] || rgbColor[0], rgbColor[2] || rgbColor[0]);
-}
+  const colors = color.replace(/[\(\)\[\]\s]/g, '').split(',');
 
-/**
- * Repair a pdf using the external qpdf and mutool utilities.
- * Use qpdf to decrcrypt the pdf to avoid errors due to DRMs.
- * @param filePath The absolute filename and path of the pdf file to be repaired.
- */
-function repairPdf(filePath: string) {
-  const qpdfPath = utils.getCommandLocationOnSystem('qpdf');
-  let qpdfOutputFile = utils.getTemporaryFile('.pdf');
-  if (qpdfPath) {
-    const process = spawnSync('qpdf', ['--decrypt', filePath, qpdfOutputFile]);
-
-    if (process.status === 0) {
-      logger.info(
-        `qpdf repair successfully performed on file ${filePath}. New file at: ${qpdfOutputFile}`,
-      );
-    } else {
-      logger.warn(
-        'qpdf error for file ${filePath}:',
-        process.status,
-        process.stdout.toString(),
-        process.stderr.toString(),
-      );
-      qpdfOutputFile = filePath;
-    }
+  if (colors.length === 3) {
+    finalColor = rgbToHex(colors[0], colors[1], colors[2]);
+  } else if (colors.length === 4) {
+    const { r, g, b } = cmykToRGB(+colors[0], +colors[1], +colors[2], +colors[3]);
+    finalColor = rgbToHex(r, g, b);
   } else {
-    logger.warn(`qpdf not found on the system. Not repairing the PDF...`);
-    qpdfOutputFile = filePath;
+    finalColor = '#000000';
   }
-
-  return new Promise<string>(resolve => {
-    const mutoolPath = utils.getCommandLocationOnSystem('mutool');
-    if (!mutoolPath) {
-      logger.warn('MuPDF not installed !! Skip clean PDF.');
-      resolve(qpdfOutputFile);
-    } else {
-      const mupdfOutputFile = utils.getTemporaryFile('.pdf');
-      const pdfFixer = spawn('mutool', ['clean', qpdfOutputFile, mupdfOutputFile]);
-      pdfFixer.on('close', () => {
-        // Check that the file is correctly written on the file system
-        fs.fsyncSync(fs.openSync(qpdfOutputFile, 'r+'));
-        logger.info(
-          `mupdf cleaning successfully performed on file ${qpdfOutputFile}. Resulting file: ${mupdfOutputFile}`,
-        );
-        resolve(mupdfOutputFile);
-      });
-    }
-  });
+  return finalColor;
 }

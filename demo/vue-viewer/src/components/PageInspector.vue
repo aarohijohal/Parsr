@@ -57,6 +57,22 @@
               :hide-details="true"
               @change="swapFilters()"
             ></v-switch>
+            <v-switch
+              v-model="tocFilter"
+              label="Table of Contents"
+              class="switch"
+              color="indigo darken-3"
+              :hide-details="true"
+              @change="swapFilters()"
+            ></v-switch>
+            <v-switch
+              v-model="marginsFilter"
+              label="Page Margins"
+              class="switch"
+              color="indigo darken-3"
+              :hide-details="true"
+              @change="swapFilters()"
+            ></v-switch>
           </div>
         </v-expansion-panel-content>
       </v-expansion-panel>
@@ -69,12 +85,14 @@ import { mapGetters, mapMutations } from 'vuex';
 export default {
   data() {
     return {
+      tocFilter: this.filters.TOC,
       wordsFilter: this.filters.words,
       linesFilter: this.filters.lines,
       paragraphsFilter: this.filters.paragraphs,
       tablesFilter: this.filters.tables,
       headingsFilter: this.filters.headings,
       listsFilter: this.filters.lists,
+      marginsFilter: this.filters.margins,
     };
   },
   props: {
@@ -98,12 +116,14 @@ export default {
     ...mapMutations(['switchExpansionPanel']),
     swapFilters() {
       const newFilters = {
+        TOC: this.tocFilter,
         words: this.wordsFilter,
         lines: this.linesFilter,
         paragraphs: this.paragraphsFilter,
         tables: this.tablesFilter,
         headings: this.headingsFilter,
         lists: this.listsFilter,
+        margins: this.marginsFilter,
       };
       this.$store.commit('setInspectorFilters', newFilters);
     },

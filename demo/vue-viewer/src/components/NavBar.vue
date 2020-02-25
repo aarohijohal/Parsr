@@ -1,6 +1,7 @@
 <template>
   <div id="nav">
     <span class="brand">
+      <img :src="logoIcon" />
       <span>Parsr</span>
     </span>
 
@@ -19,30 +20,29 @@
     <router-link to="/viewerCsv">
       Csv
     </router-link>
-    <nav-item text="Search" :icon="searchIcon" @clicked="searchClick" />
-    <nav-item text="Guide" :icon="guideIcon" @clicked="guideClick" />
+    <v-spacer />
+    <download-button v-if="documentFetched" />
   </div>
 </template>
 
 <script>
-import NavItem from '@/components/NavBarItem.vue';
-import SearchIcon from '@/assets/search.png';
-import GuideIcon from '@/assets/guide.png';
+import Logo from '@/assets/logo.png';
+import DownloadButton from './DownloadButton';
+import { mapState } from 'vuex';
 
 export default {
-  components: { NavItem },
+  components: {
+    DownloadButton,
+  },
   data() {
     return {
-      searchIcon: SearchIcon,
-      guideIcon: GuideIcon,
+      logoIcon: Logo,
     };
   },
-  methods: {
-    searchClick() {
-      console.log('searchClick');
-    },
-    guideClick() {
-      console.log('guideClick');
+  computed: {
+    ...mapState(['document']),
+    documentFetched() {
+      return this.document !== null;
     },
   },
 };
@@ -53,9 +53,11 @@ export default {
 }
 #nav .brand span {
   font-weight: bold;
-  font-size: 2em;
+  font-family: auto;
+  font-size: 2.5em;
   color: #00008a;
   margin: 0 0 0 0.3em;
+  line-height: 1em;
 }
 #nav .brand * {
   vertical-align: middle;

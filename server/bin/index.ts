@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 AXA Group Operations S.A.
+ * Copyright 2020 AXA Group Operations S.A.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-import * as child_process from 'child_process';
 import * as commander from 'commander';
 import * as filetype from 'file-type';
 import * as fs from 'fs';
@@ -22,9 +21,12 @@ import * as path from 'path';
 import { Cleaner } from '../src/Cleaner';
 import { AbbyyTools } from '../src/input/abbyy/AbbyyTools';
 import { AbbyyToolsXml } from '../src/input/abbyy/AbbyyToolsXml';
+import { AmazonTextractExtractor } from '../src/input/amazon-textract/AmazonTextractExtractor';
+import { DocxExtractor } from '../src/input/doc/DocxExtractor';
+import { EmailExtractor } from '../src/input/email/EmailExtractor';
 import { GoogleVisionExtractor } from '../src/input/google-vision/GoogleVisionExtractor';
 import { JsonExtractor } from '../src/input/json/JsonExtractor';
-import { PdfminerExtractor } from '../src/input/pdfminer/PdfminerExtractor';
+import { MicrosoftCognitiveExtractor } from '../src/input/ms-cognitive-services/MicrosoftCognitiveServices';
 import { TesseractExtractor } from '../src/input/tesseract/TesseractExtractor';
 import { Orchestrator } from '../src/Orchestrator';
 import { CsvExporter } from '../src/output/csv/CsvExporter';
@@ -35,6 +37,7 @@ import { TextExporter } from '../src/output/text/TextExporter';
 import { Config } from '../src/types/Config';
 import { Document, Image } from '../src/types/DocumentRepresentation/';
 import * as utils from '../src/utils';
+import * as CommandExecuter from '../src/utils/CommandExecuter';
 import logger from '../src/utils/Logger';
 
 /**
@@ -65,7 +68,7 @@ function main(): void {
 
   printVersion();
 
-  let filePath: string = path.resolve(commander.inputFile);
+  const filePath: string = path.resolve(commander.inputFile);
   const outputFolder: string = path.resolve(commander.outputFolder);
   if (!fs.existsSync(outputFolder)) {
     logger.info(`Requested output folder ${outputFolder} did not exist. Creating... `);
@@ -73,7 +76,7 @@ function main(): void {
       fs.mkdirSync(outputFolder);
     } catch (err) {
       logger.error(`Error creating the requested output folder ${outputFolder}: ${err}`);
-      throw(err);
+      throw err;
     }
   }
   const documentName: string = commander.documentName;
@@ -100,14 +103,17 @@ function main(): void {
   if (fileType.ext === 'xml') {
     orchestrator = new Orchestrator(new AbbyyToolsXml(config), cleaner);
   } else if (fileType.ext === 'pdf') {
-    orchestrator = getPdfExtractor();
+    orchestrator = new Orchestrator(utils.getPdfExtractor(config), cleaner);
   } else if (fileType.mime.slice(0, 5) === 'image') {
-    orchestrator = getImgExtractor();
+    orchestrator = getOcrExtractor();
   } else if (fileType.ext === 'json') {
     orchestrator = getJsonExtractor();
+  } else if (fileType.ext === 'eml') {
+    orchestrator = getEmlExtractor();
+  } else if (fileType.ext === 'docx') {
+    orchestrator = getDocxExtractor();
   } else {
-    process.exit(1);
-    throw new Error('Input file is neither a PDF nor an image');
+    throw new Error('Input file format is unsupported');
   }
 
   /**
@@ -126,24 +132,23 @@ function main(): void {
       .run(filePath)
       .then((doc: Document) => {
         if (fileTypeInfo.ext === 'pdf' && isDocumentImageBased(doc)) {
-          logger.info(`Since the input file is a PDF with only images, trying to run an OCR on all pages...`);
-          if (config.extractor.img === 'tesseract') {
-            filePath = pdfToImage(filePath);
-            orchestrator = new Orchestrator(new TesseractExtractor(config), cleaner);
-          } else {
-            orchestrator = new Orchestrator(new AbbyyTools(config), cleaner);
-          }
-          return orchestrator.run(filePath);
+          logger.info(
+            `Since the input file is a PDF with only images, trying to run an OCR on all pages...`,
+          );
+          return getOcrExtractor().run(filePath);
         }
         return doc;
       })
       .then((doc: Document) => {
+        copyAssetsToOutputFolder(doc);
+        return doc;
+      })
+      .then((doc: Document) => {
         const promises: Array<Promise<any>> = [];
-
         if (config.output.formats.json) {
           promises.push(
             new JsonExporter(doc, config.output.granularity).export(
-              `${outputFolder}/${documentName}.json`,
+              `${outputFolder}/${omitFilenameExtension(documentName)}.json`,
             ),
           );
         }
@@ -151,7 +156,7 @@ function main(): void {
         // if (config.output.formats['json-compact']) {
         // 	promises.push(
         // 		new JsonCompactExporter(doc).export(
-        // 			`${outputFolder}/${documentName}.compact.json`,
+        // 			`${outputFolder}/${omitFilenameExtension(documentName)}.compact.json`,
         // 		),
         // 	);
         // }
@@ -159,15 +164,15 @@ function main(): void {
         if (config.output.formats.text) {
           promises.push(
             new TextExporter(doc, config.output.includeMarginals).export(
-              `${outputFolder}/${documentName}.txt`,
+              `${outputFolder}/${omitFilenameExtension(documentName)}.txt`,
             ),
           );
         }
 
         if (config.output.formats.markdown) {
           promises.push(
-            new MarkdownExporter(doc, config.output.includeMarginals).export(
-              `${outputFolder}/${documentName}.md`,
+            new MarkdownExporter(doc, config.output.includeMarginals, documentName).export(
+              `${outputFolder}/${omitFilenameExtension(documentName)}.md`,
             ),
           );
         }
@@ -175,7 +180,7 @@ function main(): void {
         // if (config.output.formats.xml) {
         // 	promises.push(
         // 		new XmlExporter(doc).export(
-        // 			`${outputFolder}/${documentName}.md`
+        // 			`${outputFolder}/${omitFilenameExtension(documentName)}.md`
         // 		)
         // 	);
         // }
@@ -183,29 +188,71 @@ function main(): void {
         // if (config.output.formats.confidences) {
         // 	promises.push(
         // 		new ConfidencesExporter(doc).export(
-        // 			`${outputFolder}/${documentName}.confidences`
+        // 			`${outputFolder}/${omitFilenameExtension(documentName)}.confidences`
         // 		)
         // 	);
         // }
 
         if (config.output.formats.csv) {
-          promises.push(new CsvExporter(doc).export(`${outputFolder}/${documentName}.csv`));
+          promises.push(
+            new CsvExporter(doc).export(
+              `${outputFolder}/${omitFilenameExtension(documentName)}.csv`,
+            ),
+          );
         }
 
         if (config.output.formats.pdf) {
           promises.push(
             new PdfExporter(doc, config.output.includeMarginals).export(
-              `${outputFolder}/${documentName}.pdf`,
+              `${outputFolder}/${omitFilenameExtension(documentName)}.pdf`,
             ),
           );
+        }
+
+        function omitFilenameExtension(filename: string): string {
+          return filename.replace(/\.[^/.]+$/, '');
         }
 
         logger.debug('Done');
         return Promise.all(promises);
       })
       .catch(err => {
-        logger.error(`There was an error running the orchestrator: ${err}`);
+        if (err && err.stack) {
+          logger.error(`There was an error running the orchestrator: ${err.stack}`);
+        }
+        logger.error(JSON.stringify(err));
       });
+  }
+
+  function copyAssetsToOutputFolder(doc: Document) {
+    if (!doc.assetsFolder) {
+      return;
+    }
+    const destinationFolder = outputFolder + '/assets_' + documentName;
+    const filesToCopy: Array<{ from: string; to: string }> = [];
+    fs.readdirSync(doc.assetsFolder).forEach(file => {
+      const imageFileType: { ext: string; mime: string } = filetype(
+        fs.readFileSync(doc.assetsFolder + '/' + file),
+      );
+
+      if (imageFileType != null && imageFileType.mime.slice(0, 5) === 'image') {
+        filesToCopy.push({
+          from: doc.assetsFolder + '/' + file,
+          to: destinationFolder + '/' + path.basename(file),
+        });
+      }
+    });
+    filesToCopy.forEach(file => {
+      try {
+        if (!fs.existsSync(destinationFolder)) {
+          fs.mkdirSync(destinationFolder);
+        }
+        fs.copyFileSync(file.from, file.to);
+      } catch (e) {
+        logger.error('Error copying assets');
+        logger.error(e);
+      }
+    });
   }
 
   /**
@@ -213,23 +260,26 @@ function main(): void {
    * This is true for example, in the case of scanned documents as PDFs
    */
   function isDocumentImageBased(doc: Document): boolean {
-    return !doc.pages.map(p => (p.elements.length === 1) && (p.elements[0] instanceof Image)).includes(false);
+    return !doc.pages
+      .map(p => p.elements.length === 1 && p.elements[0] instanceof Image)
+      .includes(false);
   }
 
   /**
-   * Returns the pdf extraction orchestrator depending on the extractor selection made in the configuration.
-   *
+   * Returns the email extraction orchestrator.
+   * This extractor has no need of a configuration file or a cleaner
    * @returns The Orchestrator instance
    */
-  function getPdfExtractor(): Orchestrator {
-    if (config.extractor.pdf === 'abbyy') {
-      return new Orchestrator(new AbbyyTools(config), cleaner);
-    } else if (config.extractor.pdf === 'tesseract') {
-      filePath = pdfToImage(filePath);
-      return new Orchestrator(new TesseractExtractor(config), cleaner);
-    } else {
-      return new Orchestrator(new PdfminerExtractor(config), cleaner);
-    }
+  function getEmlExtractor(): Orchestrator {
+    return new Orchestrator(new EmailExtractor(config), cleaner);
+  }
+
+  /**
+   * Returns the docx extraction orchestrator.
+   * @returns The Orchestrator instance
+   */
+  function getDocxExtractor(): Orchestrator {
+    return new Orchestrator(new DocxExtractor(config), cleaner);
   }
 
   /**
@@ -242,46 +292,18 @@ function main(): void {
   }
 
   /**
-   * Returns the img extraction orchestrator depending on the extractor selection made in the configuration.
+   * Returns the ocr extraction orchestrator depending on the extractor selection made in the configuration.
    *
    * @returns The Orchestrator instance
    */
-  function getImgExtractor(): Orchestrator {
-    if (config.extractor.img === 'tesseract') {
-      return new Orchestrator(new TesseractExtractor(config), cleaner);
-    } else if (config.extractor.img === 'google-vision') {
-      return new Orchestrator(new GoogleVisionExtractor(config), cleaner);
-    } else {
-      return new Orchestrator(new AbbyyTools(config), cleaner);
+  function getOcrExtractor(): Orchestrator {
+    switch (config.extractor.ocr) {
+      case 'tesseract': return new Orchestrator(new TesseractExtractor(config), cleaner);
+      case 'google-vision': return new Orchestrator(new GoogleVisionExtractor(config), cleaner);
+      case 'ms-cognitive-services': return new Orchestrator(new MicrosoftCognitiveExtractor(config), cleaner);
+      case 'amazon-textract': return new Orchestrator(new AmazonTextractExtractor(config), cleaner);
+      default: return new Orchestrator(new AbbyyTools(config), cleaner);
     }
-  }
-
-  /**
-   * Returns the pdf file extraction orchestrator using tesseract as the extractor.
-   * First, the pdf is sampled for it to be converted into an image, then, an image extraction orchestrator is returned.
-   *
-   * @returns The Orchestrator instance
-   */
-  function pdfToImage(pdfPath: string): string {
-    const tifFilePath = pdfPath + '.tiff';
-    const ret = child_process.spawnSync(utils.getConvertPath(), [
-      'convert',
-      '-density',
-      '200x200',
-      '-compress',
-      'Fax',
-      pdfPath,
-      tifFilePath,
-    ]);
-
-    if (ret.status !== 0) {
-      logger.error(ret.stderr);
-      throw new Error(
-        'ImageMagick failure: impossible to convert pdf to images (is ImageMagick installed?)',
-      );
-    }
-
-    return tifFilePath;
   }
 }
 
@@ -292,12 +314,11 @@ function main(): void {
  */
 function printVersion() {
   try {
-    const message = child_process
-      .spawnSync(
-        'git',
-        ['--no-pager', 'show', '-s', '--no-color', '--format=[%h] %d - %s - (%cd, %cn <%ce>)'],
-        { encoding: 'utf-8' },
-      )
+    const message = CommandExecuter.spawnSync(
+      'git',
+      ['--no-pager', 'show', '-s', '--no-color', '--format=[%h] %d - %s - (%cd, %cn <%ce>)'],
+      { encoding: 'utf-8' },
+    )
       .output.join('')
       .trim();
     logger.info('Current version: ' + message);

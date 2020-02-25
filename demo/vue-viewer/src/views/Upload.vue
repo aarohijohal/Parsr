@@ -3,19 +3,13 @@
     <form @submit.prevent="upload">
       <fieldset>
         <legend>Input file</legend>
-        <input
-          type="file"
-          id="file"
-          name="file"
-          @change="fileChanged($event)"
-          style="margin:10px 0px"
-        />
+        <input type="file" id="file" name="file" @change="fileChanged" style="margin:10px 0px" />
       </fieldset>
 
       <fieldset>
         <legend>Extractor configuration</legend>
         <v-select
-          :items="['pdfminer']"
+          :items="['pdfminer', 'pdfjs']"
           v-model="defaultConfig.extractor.pdf"
           :flat="true"
           :hide-details="true"
@@ -26,6 +20,107 @@
           prefix="Pdf"
           solo
         ></v-select>
+        <v-select
+          :items="[
+            'tesseract',
+            'abbyy',
+            'google-vision',
+            'ms-cognitive-services',
+            'amazon-textract',
+          ]"
+          v-model="defaultConfig.extractor.ocr"
+          :flat="true"
+          :hide-details="true"
+          background-color="transparent"
+          color="rgba(0, 0, 0, 0.54)"
+          height="20px"
+          class="selectOptionExtractor"
+          prefix="OCR"
+          solo
+        ></v-select>
+        <div
+          class="selectOptionExtractor ocrParameters"
+          v-if="defaultConfig.extractor.ocr === 'google-vision'"
+        >
+          <legend>GOOGLE_APPLICATION_CREDENTIALS<sup>*</sup></legend>
+          <input
+            type="file"
+            @change="googleCredentialChanged"
+            id="googleVisionCredentials"
+            name="googleVisionCredentials"
+            accept="application/json"
+            style="border-style: groove"
+          />
+        </div>
+        <div
+          class="selectOptionExtractor ocrParameters"
+          v-if="defaultConfig.extractor.ocr === 'ms-cognitive-services'"
+        >
+          <legend>Ocp-Apim-Subscription-Key<sup>*</sup></legend>
+          <input
+            style="border-style: groove"
+            id="MSAPIKEY"
+            name="MSAPIKEY"
+            v-model="OCP_APIM_SUBSCRIPTION_KEY"
+          />
+
+          <legend>Endpoint<sup>*</sup></legend>
+          <input
+            style="border-style: groove"
+            id="MSENDPOINT"
+            name="MSENDPOINT"
+            v-model="OCP_APIM_ENDPOINT"
+          />
+        </div>
+        <div
+          class="selectOptionExtractor ocrParameters"
+          v-if="defaultConfig.extractor.ocr === 'amazon-textract'"
+        >
+          <legend>Access_key_id<sup>*</sup></legend>
+          <input
+            style="border-style: groove"
+            id="awsKeyId"
+            name="awsKeyId"
+            v-model="AWS_ACCESS_KEY_ID"
+          />
+
+          <legend>Secret_access_key<sup>*</sup></legend>
+          <input
+            style="border-style: groove"
+            id="awsSecretKey"
+            name="awsSecretKey"
+            v-model="AWS_SECRET_ACCESS_KEY"
+          />
+        </div>
+
+        <div
+          class="selectOptionExtractor ocrParameters"
+          v-if="defaultConfig.extractor.ocr === 'abbyy'"
+        >
+          <legend>Abbyy_server_url<sup>*</sup></legend>
+          <input
+            style="border-style: groove"
+            id="abbyyServerUrl"
+            name="abbyyServerUrl"
+            v-model="ABBYY_SERVER_URL"
+          />
+
+          <legend>Abbyy_server_ver<sup>*</sup></legend>
+          <input
+            style="border-style: groove"
+            id="abbyyServerVer"
+            name="abbyyServerVer"
+            v-model="ABBYY_SERVER_VER"
+          />
+
+          <legend>Abbyy_server_workflow<sup>*</sup></legend>
+          <input
+            style="border-style: groove"
+            id="abbyyServerWorkflow"
+            name="abbyyServerWorkflow"
+            v-model="ABBYY_WORKFLOW"
+          />
+        </div>
       </fieldset>
 
       <fieldset>
@@ -70,6 +165,7 @@
 import CheckIcon from '@/assets/check.png';
 import { mapState } from 'vuex';
 import { setInterval, clearInterval, setTimeout } from 'timers';
+import credentialsMixin from '@/mixins/serviceCredentials';
 import ConfigItem from '@/components/UploadConfig/ConfigItem';
 export default {
   data() {
@@ -84,6 +180,7 @@ export default {
       customConfig: null,
     };
   },
+  mixins: [credentialsMixin],
   components: { ConfigItem },
   computed: {
     ...mapState({
@@ -99,9 +196,19 @@ export default {
       });
     },
     isSubmitDisabled() {
-      return !this.file;
+      return (
+        !this.file ||
+        (this.customConfig.extractor.ocr === 'google-vision' &&
+          !this.GOOGLE_APPLICATION_CREDENTIALS) ||
+        (this.customConfig.extractor.ocr === 'ms-cognitive-services' &&
+          !(this.OCP_APIM_SUBSCRIPTION_KEY && this.OCP_APIM_ENDPOINT)) ||
+        (this.customConfig.extractor.ocr === 'amazon-textract' &&
+          !(this.AWS_ACCESS_KEY_ID && this.AWS_SECRET_ACCESS_KEY)) ||
+        (this.customConfig.extractor.ocr === 'abbyy' &&
+          !(this.ABBYY_SERVER_URL && this.ABBYY_SERVER_VER && this.ABBYY_WORKFLOW))
+      );
     },
-    /* 
+    /*
 			this function takes the config in 'specs' format and returns only the values of each parameter
 			ex:
 				parameter: {
@@ -122,6 +229,14 @@ export default {
         }
         return mod;
       });
+
+      if (config.extractor.credentials.GOOGLE_APPLICATION_CREDENTIALS) {
+        config.extractor.credentials = {
+          ...config.extractor.credentials,
+          ...config.extractor.credentials.GOOGLE_APPLICATION_CREDENTIALS,
+        };
+        delete config.extractor.credentials.GOOGLE_APPLICATION_CREDENTIALS;
+      }
       return config;
     },
     configAsBinary() {
@@ -165,6 +280,13 @@ export default {
     },
     fileChanged(event) {
       this.file = event.target.files[0];
+    },
+    googleCredentialChanged(event) {
+      const reader = new FileReader();
+      reader.readAsText(event.target.files[0]);
+      reader.onload = e => {
+        this.GOOGLE_APPLICATION_CREDENTIALS = JSON.parse(e.target.result);
+      };
     },
     trackPipeStatus() {
       const interval = setInterval(() => {
@@ -244,7 +366,7 @@ export default {
   padding: 0 !important;
 }
 .selectOptionExtractor div.v-input__control div.v-select__slot {
-  width: 100px;
+  width: 210px;
 }
 .selectOptionExtractor div.v-input__control div.v-select__slot div.v-text-field__prefix {
   min-width: 60px;
@@ -252,7 +374,7 @@ export default {
 }
 .selectOptionExtractor div.v-input__control div.v-input__slot div.v-select__selection {
   border: solid 1px #cccccc;
-  min-width: 90px;
+  min-width: 120px;
   text-align: center;
   display: block;
   padding: 0 5px;
@@ -349,5 +471,19 @@ label span {
 }
 .selectOptionExtractor div {
   min-height: auto !important;
+}
+
+.ocrParameters {
+  padding-left: 60px;
+  text-align: left;
+}
+
+.ocrParameters legend {
+  font-size: 0.8em;
+}
+.ocrParameters input {
+  font-size: 0.8em;
+  width: 230px;
+  color: rgba(0, 0, 0, 0.87);
 }
 </style>

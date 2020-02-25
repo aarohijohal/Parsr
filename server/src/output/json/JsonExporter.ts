@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 AXA Group Operations S.A.
+ * Copyright 2020 AXA Group Operations S.A.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { RotationCorrection } from '../../input/OcrExtractor';
 import {
   Barcode,
   BoundingBox,
@@ -30,6 +31,7 @@ import {
   JsonFont,
   JsonMetadata,
   JsonPage,
+  JsonPageRotation,
   List,
   Page,
   Table,
@@ -40,6 +42,8 @@ import {
 } from '../../types/DocumentRepresentation';
 import { SvgLine } from '../../types/DocumentRepresentation/SvgLine';
 import { SvgShape } from '../../types/DocumentRepresentation/SvgShape';
+import { TableOfContents } from '../../types/DocumentRepresentation/TableOfContents';
+import { TableOfContentsItem } from '../../types/DocumentRepresentation/TableOfContentsItem';
 import { ComplexMetadata, Metadata, NumberMetadata } from '../../types/Metadata';
 import * as utils from '../../utils';
 import logger from '../../utils/Logger';
@@ -71,7 +75,9 @@ export class JsonExporter extends Exporter {
 
     this.json.pages = this.doc.pages.map((page: Page) => {
       const jsonPage: JsonPage = {
+        margins: this.doc.margins,
         box: this.boxToJsonBox(page.box),
+        rotation: this.rotationToJsonRotation(page.pageRotation),
         pageNumber: page.pageNumber,
         elements: page.elements
           .sort(utils.sortElementsByOrder)
@@ -90,6 +96,7 @@ export class JsonExporter extends Exporter {
       let weight = font.weight;
       let isItalic = font.isItalic;
       let isUnderline = font.isUnderline;
+      let sizeUnit = 'px';
       let color = font.color;
 
       if (font.color !== 'black' && font.color !== '#000000' && font.color !== '000000') {
@@ -108,6 +115,10 @@ export class JsonExporter extends Exporter {
         isUnderline = font.isUnderline;
       }
 
+      if (font.sizeUnit) {
+        sizeUnit = font.sizeUnit;
+      }
+
       const jsonFont: JsonFont = {
         id: fontId,
         name,
@@ -118,6 +129,7 @@ export class JsonExporter extends Exporter {
         color,
         url,
         scaling,
+        sizeUnit,
       };
 
       this.json.fonts.push(jsonFont);
@@ -220,6 +232,8 @@ export class JsonExporter extends Exporter {
             jsonElement.font = this.fontCatalog.get(wordFont[0]);
           }
         }
+      } else if (element instanceof Heading) {
+        jsonElement.level = element.level;
       }
     } else if (element instanceof List) {
       jsonElement.isOrdered = element.isOrdered;
@@ -247,9 +261,20 @@ export class JsonExporter extends Exporter {
       jsonElement.codeType = element.type;
       jsonElement.codeValue = element.content;
     } else if (element instanceof Image) {
-      jsonElement.src = element.src;  // TODO replace this with a location based on an API access point
+      if (!element.enabled) {
+        // If image detection module is not executed in pipe all images have enabled = false
+        return null;
+      }
+      jsonElement.src = element.src; // TODO replace this with a location based on an API access point
+      jsonElement.refId = element.refId;
+      jsonElement.xObjId = element.xObjId;
+      jsonElement.xObjExt = element.xObjExt;
     } else if (element instanceof Heading) {
       jsonElement.level = element.level;
+    } else if (element instanceof TableOfContents) {
+      jsonElement.content = element.content.map(elem => this.elementToJsonElement(elem));
+    } else if (element instanceof TableOfContentsItem) {
+      jsonElement.content = element.toString();
     }
 
     return jsonElement;
@@ -264,6 +289,23 @@ export class JsonExporter extends Exporter {
     };
 
     return jsonBox;
+  }
+
+  private rotationToJsonRotation(rotation: RotationCorrection): JsonPageRotation {
+    if (rotation != null) {
+      const jsonRotation: JsonPageRotation = {
+        degrees: rotation.degrees,
+        origin: rotation.origin,
+        translation: rotation.translation,
+      };
+      return jsonRotation;
+    }
+    const noRotation: JsonPageRotation = {
+      degrees: 0,
+      origin: { x: 0, y: 0 },
+      translation: { x: 0, y: 0 },
+    };
+    return noRotation;
   }
 
   private convertElementValue(value: any): any {

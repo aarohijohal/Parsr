@@ -24,8 +24,24 @@
                 <span>{{ fontInfo(currentElement.font) }}</span>
                 <ul style="list-style-type: none; margin:0px; padding:0px">
                   <li><span>Usage ratio:</span></li>
-                  <li style="padding-left:10px;"><span>- Document {{ fontUsageRatio(currentElement.font).documentRatio }}</span></li>
-                  <li style="padding-left:10px;"><span>- Page {{ fontUsageRatio(currentElement.font).pageRatio }}</span></li>
+                  <li style="padding-left:10px;">
+                    <span
+                      >- Document
+                      {{
+                        fontUsageRatio[currentElement.font] &&
+                          fontUsageRatio[currentElement.font].documentRatio
+                      }}</span
+                    >
+                  </li>
+                  <li style="padding-left:10px;">
+                    <span
+                      >- Page
+                      {{
+                        fontUsageRatio[currentElement.font] &&
+                          fontUsageRatio[currentElement.font].pageRatio
+                      }}</span
+                    >
+                  </li>
                 </ul>
               </li>
               <li>
@@ -49,11 +65,11 @@
                 <ul>
                   <li>
                     <span>colspan:</span>
-                    <span class="wordContent">{{currentElement.colspan}}</span>
+                    <span class="wordContent">{{ currentElement.colspan }}</span>
                   </li>
                   <li>
                     <span>rowspan:</span>
-                    <span class="wordContent">{{currentElement.rowspan}}</span>
+                    <span class="wordContent">{{ currentElement.rowspan }}</span>
                   </li>
                 </ul>
               </li>
@@ -117,6 +133,9 @@ export default {
   methods: {
     ...mapMutations(['switchExpansionPanel']),
     fontInfo(fontId) {
+      if (!this.fontUsageRatio[fontId]) {
+        this.$store.dispatch('calculateFontUsageRatio', fontId);
+      }
       const font = this.fonts.filter(font => font.id === fontId).shift();
       if (font) {
         return '(' + font.name + ', ' + font.weight + ', size ' + font.size + ')';

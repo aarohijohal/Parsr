@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 AXA Group Operations S.A.
+ * Copyright 2020 AXA Group Operations S.A.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,15 +14,21 @@
  * limitations under the License.
  */
 
-import { spawnSync } from 'child_process';
+import { exec } from 'child_process';
 import * as concaveman from 'concaveman';
+import HTMLToPDF from 'convert-html-to-pdf';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { inspect } from 'util';
 import { OptionsV2, parseString } from 'xml2js';
-import { DOMParser } from 'xmldom';
+import { AbbyyTools } from './input/abbyy/AbbyyTools';
+import { Extractor } from './input/Extractor';
+import { PDFJsExtractor } from './input/pdf.js/PDFJsExtractor';
+import { PdfminerExtractor } from './input/pdfminer/PdfminerExtractor';
+import { TesseractExtractor } from './input/tesseract/TesseractExtractor';
+import { Config } from './types/Config';
 import {
   BoundingBox,
   Document,
@@ -34,7 +40,8 @@ import {
 } from './types/DocumentRepresentation';
 import logger from './utils/Logger';
 
-let mutoolImagesFolder: string = '';
+import * as CommandExecuter from './utils/CommandExecuter';
+
 let mutoolExtractionFolder: string = '';
 
 export function replaceObject<T extends Element, U extends T>(
@@ -79,82 +86,6 @@ export function replaceObject<T extends Element, U extends T>(
       });
     }
   }
-}
-
-// Handle Windows convert.exe conflict.
-export function getConvertPath(): string {
-  const where = spawnSync(getExecLocationCommandOnSystem(), ['magick']);
-  let filePaths: string[] = [];
-
-  if (where.status === 0) {
-    filePaths = where.stdout.toString().split(os.EOL);
-    filePaths = filePaths.filter(
-      filePath => !/System/.test(filePath) && filePath.trim().length > 0,
-    );
-  }
-
-  if (filePaths.length === 0) {
-    throw new Error('Cannot find ImageMagick convert tool. Are you sure it is installed?');
-  } else {
-    return filePaths[0];
-  }
-}
-
-/**
- * Returns the location of the python command on the system
- */
-export function getPythonLocation(): string {
-  const pythonLocation: string = getCommandLocationOnSystem('python3', 'python');
-  if (!pythonLocation) {
-    logger.warn(`Unable to find python. Are you sure it is installed?`);
-    return '';
-  } else {
-    logger.debug(`python was found at ${pythonLocation}`);
-    return pythonLocation;
-  }
-}
-
-/**
- * Returns the location of the pdf2txt command on the system
- */
-export function getPdf2txtLocation(): string {
-  const pdf2txtLocation: string = getCommandLocationOnSystem('pdf2txt.py', 'pdf2txt');
-  if (!pdf2txtLocation) {
-    logger.warn(
-      `Unable to find pdf2txt, the pdfminer tool on the system. Are you sure it is installed?`,
-    );
-    return '';
-  } else {
-    logger.debug(`pdf2txt was found at ${pdf2txtLocation}`);
-    return pdf2txtLocation;
-  }
-}
-
-/**
- * Returns the location of the dumppdf command on the system
- */
-export function getDumppdfLocation(): string {
-  const dumppdfLocation: string = getCommandLocationOnSystem('dumppdf.py', 'dumppdf');
-  if (!dumppdfLocation) {
-    logger.warn(
-      `Unable to find dump, the pdfminer tool on the system. Are you sure it is installed?`,
-    );
-    return '';
-  } else {
-    logger.debug(`dumppdf was found at ${dumppdfLocation}`);
-    return dumppdfLocation;
-  }
-}
-
-export function getMutoolImagesPrefix(): string {
-  return 'page';
-}
-
-export function getMutoolImagesFolder(): string {
-  if (!mutoolImagesFolder) {
-    mutoolImagesFolder = getTemporaryDirectory();
-  }
-  return mutoolImagesFolder;
 }
 
 export function getMutoolExtractionFolder(): string {
@@ -394,7 +325,7 @@ export function removeNull(page: Page): Page {
   if (page.elements.length - newElements.length !== 0) {
     logger.debug(
       `Null elements removed for page #${page.pageNumber}: ${page.elements.length -
-      newElements.length}`,
+        newElements.length}`,
     );
     page.elements = newElements;
   }
@@ -428,11 +359,11 @@ export function getPageRegex(): RegExp {
 
   const pageRegex = new RegExp(
     `^(?:` +
-    `(?:${pagePrefix}${pageNumber})|` +
-    `(?:${pageNumber}\\s*(?:\\|\\s*)?${pageWord})|` +
-    `(?:(?:${pageWord}\\s*)?${pageNumber}\\s*${ofWord}\\s*${pageNumber})|` +
-    `(?:${before}${pageNumber}${after})` +
-    `)$`,
+      `(?:${pagePrefix}${pageNumber})|` +
+      `(?:${pageNumber}\\s*(?:\\|\\s*)?${pageWord})|` +
+      `(?:(?:${pageWord}\\s*)?${pageNumber}\\s*${ofWord}\\s*${pageNumber})|` +
+      `(?:${before}${pageNumber}${after})` +
+      `)$`,
     'i',
   );
 
@@ -705,33 +636,6 @@ export function findMostCommonFont(fonts: Font[]): Font | undefined {
 }
 
 /**
- * returns the location of the executable locator command on the current system.
- * on linux/unix machines, this is 'which', on windows machines, it is 'where'.
- */
-export function getExecLocationCommandOnSystem(): string {
-  return os.platform() === 'win32' ? 'where' : 'which';
-}
-
-/**
- * returns the location of a command on a system.
- * @param firstChoice the first choice name of the executable to be located
- * @param secondChoice the second choice name of the executable to be located
- * @param thirdChoice the third choice name of the executable to be located
- */
-export function getCommandLocationOnSystem(
-  firstChoice: string,
-  secondChoice: string = '',
-  thirdChoice: string = '',
-): string {
-  const info = spawnSync(getExecLocationCommandOnSystem(), [firstChoice]);
-  const result = info.status === 0 ? info.stdout.toString().split(os.EOL)[0] : null;
-  if (result === null && secondChoice !== '') {
-    return getCommandLocationOnSystem(secondChoice, thirdChoice);
-  }
-  return result;
-}
-
-/**
  * Returns the grouping of consecutive numbers in an array
  * @param theArray The input array of numbers
  */
@@ -752,8 +656,7 @@ export function groupConsecutiveNumbersInArray(theArray: number[]): number[][] {
 
 export function parseXmlToObject(xml: string, options: OptionsV2 = null): Promise<object> {
   const promise = new Promise<object>((resolveObject, rejectObject) => {
-    const xmlStringSerialized = new DOMParser().parseFromString(xml, 'text/xml');
-    parseString(xmlStringSerialized, options, (error, dataObject) => {
+    parseString(xml, options, (error, dataObject) => {
       if (error) {
         rejectObject(error);
       }
@@ -777,4 +680,97 @@ export function getEmphazisChars(text: string): string {
     return '***';
   }
   return '';
+}
+
+/**
+ * Returns the pdf extraction orchestrator depending on the extractor selection made in the configuration.
+ *
+ * @returns The Orchestrator instance
+ */
+export function getPdfExtractor(config: Config): Extractor {
+  switch (config.extractor.pdf) {
+    case 'abbyy':
+      return new AbbyyTools(config);
+    case 'tesseract':
+      return new TesseractExtractor(config);
+    case 'pdfjs':
+      return new PDFJsExtractor(config);
+    default:
+      return new PdfminerExtractor(config);
+  }
+}
+/*
+  merges multiple PDF files into a single one and writes it in the output path
+*/
+export function mergePDFs(files: string[], output: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    if (!CommandExecuter.isCommandAvailable('gs')) {
+      reject({
+        found: false,
+        error: `GhostScript was not found on the system. Are you sure it is installed and added to PATH?`,
+      });
+    } else {
+      /*
+        the `spawn` of CommandExecuter does not work in this case, it gets stuck in GS CLI
+        TODO: Make this command work with CommandExecuter.
+      */
+      exec(
+        `gs -DNOPAUSE -sDEVICE=pdfwrite -sOUTPUTFILE=${output} -dBATCH ${files.join(' ')}`,
+        (err, stdout, stderr) => {
+          if (err) {
+            reject(stderr);
+          } else {
+            resolve(stdout);
+          }
+        },
+      );
+    }
+  });
+}
+
+export async function convertHTMLToPDF(html: string, outputFile?: string): Promise<string> {
+  let mainPDF = getTemporaryFile('.pdf');
+  if (outputFile) {
+    mainPDF = outputFile;
+  }
+
+  html = embedImagesInHTML(html);
+
+  const toPDF = new HTMLToPDF(html, {
+    browserOptions: {
+      args: ['--no-sandbox', '--font-render-hinting=none'],
+    },
+    pdfOptions: {
+      path: mainPDF,
+      width: '210mm',
+      height: '297mm',
+      margin: {
+        top: '5mm',
+        bottom: '5mm',
+        left: '5mm',
+        right: '5mm',
+      },
+    },
+  });
+
+  await toPDF.convert();
+  return mainPDF;
+}
+
+// converts the image tags in the HTML with absolute paths to tags with the data as base64
+function embedImagesInHTML(html: string): string {
+  const regexp = new RegExp(/<img src="(\/.*?)"\s(?:style=.*?)*?\s\/>/);
+  let match = null;
+  // tslint:disable-next-line: no-conditional-assignment
+  while ((match = regexp.exec(html)) !== null) {
+    const imagePath = match[1];
+
+    const extension = path.extname(imagePath);
+    let base64 = '';
+    if (fs.existsSync(imagePath)) {
+      base64 = Buffer.from(fs.readFileSync(imagePath)).toString('base64');
+    }
+    html = html.replace(imagePath, `data:image/${extension};base64,${base64}`);
+  }
+  return html;
 }

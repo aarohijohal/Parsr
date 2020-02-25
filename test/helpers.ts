@@ -38,7 +38,7 @@ export class TableExtractorStub implements TableExtractor {
     this.stdout = stdout;
   }
 
-  readTables(_: string, _options: Options): TableExtractorResult {
+  public async readTables(_: string, _options: Options): Promise<TableExtractorResult> {
     return {
       stdout: this.stdout,
       stderr: this.stderr,
@@ -78,7 +78,7 @@ export async function getImage(
   );
 
   const te = new TesseractExtractor(config);
-  const doc = await te.run(`${__dirname}/assets/${filename}`);
+  const doc = await te.run(`${__dirname}/assets/${filename}`, false);
   const docBefore = clone(doc);
   const docAfter = await func(doc);
 

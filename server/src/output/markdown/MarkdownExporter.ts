@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 AXA Group Operations S.A.
+ * Copyright 2020 AXA Group Operations S.A.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,16 +14,26 @@
  * limitations under the License.
  */
 
-import { Document, Heading, List, Paragraph, Table } from '../../types/DocumentRepresentation';
+import {
+  Document,
+  Heading,
+  Image,
+  List,
+  Paragraph,
+  Table,
+} from '../../types/DocumentRepresentation';
+import { TableOfContents } from '../../types/DocumentRepresentation/TableOfContents';
 import logger from '../../utils/Logger';
 import { Exporter } from '../Exporter';
 
 export class MarkdownExporter extends Exporter {
   private includeHeaderFooter: boolean;
+  private docName: string;
 
-  constructor(doc: Document, includeHeaderFooter: boolean) {
+  constructor(doc: Document, includeHeaderFooter: boolean, docName?: string) {
     super(doc);
     this.includeHeaderFooter = includeHeaderFooter;
+    this.docName = docName;
   }
 
   public export(outputPath: string): Promise<any> {
@@ -33,7 +43,7 @@ export class MarkdownExporter extends Exporter {
 
   private getMarkdown(): string {
     let output: string = '';
-    this.doc.pages.forEach(page => {
+    this.doc.pages.forEach((page, pageN) => {
       page.elements.forEach(element => {
         if (
           (element.properties.isHeader || element.properties.isFooter) &&
@@ -49,11 +59,17 @@ export class MarkdownExporter extends Exporter {
           output += element.toMarkdown();
         } else if (element instanceof Table) {
           output += element.toMarkdown();
+        } else if (element instanceof TableOfContents) {
+          output += element.toMarkdown();
+        } else if (element instanceof Image) {
+          output += element.toMarkdownImage(this.docName);
         }
         output += '\n'.repeat(2);
       });
       // end of page
-      // output += '\n'.repeat(10);
+      if (this.doc.pages.length > pageN + 1) {
+        output += '---\n\n';
+      }
     });
     return output;
   }

@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 AXA Group Operations S.A.
+ * Copyright 2020 AXA Group Operations S.A.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,12 +14,12 @@
  * limitations under the License.
  */
 
-import { spawn, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import { Config } from '../../types/Config';
 import { BoundingBox, Document, Font, Page, Word } from '../../types/DocumentRepresentation';
 import { TsvElement } from '../../types/TsvElement';
 import * as utils from '../../utils';
+import * as CommandExecuter from '../../utils/CommandExecuter';
 import logger from '../../utils/Logger';
 
 /**
@@ -29,7 +29,7 @@ import logger from '../../utils/Logger';
  * @returns The promise of a valid Document (as in the Document Representation data structure).
  */
 export function execute(imageInputFile: string, config: Config): Promise<Document> {
-  return new Promise<Document>((resolve, reject) => {
+  return new Promise<Document>(async (resolve, reject) => {
     const tsvOutputFile: string = utils.getTemporaryFile('.json');
 
     let configLanguages: string[];
@@ -42,7 +42,7 @@ export function execute(imageInputFile: string, config: Config): Promise<Documen
       configLanguages = [];
     }
 
-    const langChecker = spawnSync('tesseract', ['--list-langs'], {
+    const langChecker = CommandExecuter.spawnSync('tesseract', ['--list-langs'], {
       cwd: process.cwd(),
       encoding: 'utf-8',
       env: process.env,
@@ -78,7 +78,7 @@ export function execute(imageInputFile: string, config: Config): Promise<Documen
      * Multiple languages may be specified, separated by plus characters.
      * Tesseract uses 3-character ISO 639-2 language codes.
      */
-    const tesseract = spawn('tesseract', [
+    const tesseract = CommandExecuter.spawn('tesseract', [
       '-l',
       tesseractLanguages,
       imageInputFile,
@@ -117,7 +117,7 @@ export function execute(imageInputFile: string, config: Config): Promise<Documen
             // Tesseract doesn't provide font information then we use a undefined font
             // that will be ignored in viewer and will calculate 'proper' font size
             // using word bounds height
-            Font.undefinedFont,
+            new Font('undefined', elem.height * 1.6),
           );
 
           word.confidence = elem.conf;

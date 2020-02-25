@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 AXA Group Operations S.A.
+ * Copyright 2020 AXA Group Operations S.A.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,20 +14,12 @@
  * limitations under the License.
  */
 
-import { spawnSync } from 'child_process';
 import { Document } from '../types/DocumentRepresentation';
-import logger from '../utils/Logger';
-
-interface Dimensions {
-  width: number;
-  height: number;
-}
+import * as CommandExecuter from '../utils/CommandExecuter';
 
 export function setPageDimensions(doc: Document, inputFileName: string): Promise<Document> {
-  logger.debug('Setting page dimensions...');
-
   return new Promise<Document>(resolve => {
-    getPageDimensions(inputFileName).then(dimensions => {
+    CommandExecuter.magickImageDimensions(inputFileName).then(dimensions => {
       doc.pages.forEach((page, i) => {
         page.width = dimensions[i].width;
         page.height = dimensions[i].height;
@@ -36,27 +28,7 @@ export function setPageDimensions(doc: Document, inputFileName: string): Promise
           return elem.height !== page.height || elem.width !== page.width;
         });
       });
-
       resolve(doc);
     });
   });
-
-  function getPageDimensions(filename: string): Promise<Dimensions[]> {
-    return new Promise<Dimensions[]>((resolve, reject) => {
-      const ret = spawnSync('identify', ['-format', '%[fx:w]x%[fx:h],', filename]);
-
-      if (ret.status !== 0) {
-        logger.error(ret.stderr);
-        reject(`Can't get dimensions of file ${filename}`);
-      }
-
-      const dimensions = ret.stdout.toString().split(',');
-      const retDimension: Dimensions[] = dimensions.map(dimension => {
-        const [width, height] = dimension.split('x').map(s => parseInt(s, 10));
-        return { width, height };
-      });
-
-      resolve(retDimension);
-    });
-  }
 }

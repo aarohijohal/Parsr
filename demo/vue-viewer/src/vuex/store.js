@@ -4,8 +4,31 @@ import DocumentService from '@/services/DocumentServices.js';
 
 Vue.use(Vuex);
 
+const flattenElement = element => {
+  var flattend = [];
+  !(function flat(element) {
+    flattend.push(element);
+    if (element.content) {
+      element.content.forEach(function(el) {
+        flattend.push(el);
+        if (Array.isArray(el.content)) {
+          flat(el);
+        }
+      });
+    }
+  })(element);
+  return flattend;
+};
+
+let allWordsCache = null;
+let allPageWordsCache = null;
 export default new Vuex.Store({
   state: {
+    pagination: {
+      limit: 10, //items per page
+      offset: 0, // starting index
+    },
+    fontUsageRatioCache: {},
     selectedPage: 1,
     zoom: 1.0,
     uuid: null,
@@ -44,6 +67,9 @@ export default new Vuex.Store({
     },
   },
   mutations: {
+    resetPagination(state) {
+      Vue.set(state.pagination, 'offset', 0);
+    },
     setCsvdownLoading(state, loading) {
       state.outputs.csv.loading = loading;
     },
@@ -111,8 +137,54 @@ export default new Vuex.Store({
     LOADING(state, value) {
       Vue.set(state, 'loadingConfig', value);
     },
+    calculateFontUsageRatio(state, fontId) {
+      if (state.fontUsageRatioCache[fontId]) {
+        return;
+      }
+      if (!allWordsCache) {
+        allWordsCache = state.document.pages
+          .map(page => page.elements)
+          .reduce((prev, curr) => prev.concat(curr), [])
+          .map(flattenElement)
+          .reduce((prev, curr) => prev.concat(curr), [])
+          .filter(element => element.type == 'word');
+      }
+
+      if (!allPageWordsCache) {
+        allPageWordsCache = state.document.pages
+          .filter(page => page.pageNumber === state.selectedPage)
+          .map(page => page.elements)
+          .reduce((prev, curr) => prev.concat(curr), [])
+          .map(flattenElement)
+          .reduce((prev, curr) => prev.concat(curr), [])
+          .filter(element => element.type == 'word');
+      }
+
+      const wordsWithFont = allWordsCache.filter(w => w.font == fontId);
+      const pageWordsWithFont = allPageWordsCache.filter(w => w.font == fontId);
+      const usageRatio = {
+        documentRatio:
+          Number(wordsWithFont.length / allWordsCache.length).toFixed(3) +
+          ' (' +
+          wordsWithFont.length +
+          '/' +
+          allWordsCache.length +
+          ')',
+        pageRatio:
+          Number(pageWordsWithFont.length / allPageWordsCache.length).toFixed(3) +
+          ' (' +
+          pageWordsWithFont.length +
+          '/' +
+          allPageWordsCache.length +
+          ')',
+      };
+      Vue.set(state.fontUsageRatioCache, fontId, usageRatio);
+    },
   },
   actions: {
+    calculateFontUsageRatio({ commit }, fontId) {
+      commit('calculateFontUsageRatio', fontId);
+    },
     getDefaultConfiguration({ commit }) {
       commit('LOADING', true);
       return DocumentService.getDefaultConfiguration().then(({ data }) => {
@@ -143,7 +215,10 @@ export default new Vuex.Store({
       return DocumentService.getDocumentMarkdown(this.state.uuid)
         .then(response => {
           commit('setMarkdownLoading', false);
-          commit('SET_DOCUMENT_MARKDOWN', response.data);
+          commit(
+            'SET_DOCUMENT_MARKDOWN',
+            DocumentService.normalizeImagesSrc(response.data, this.state.uuid),
+          );
           return response.data;
         })
         .catch(error => {
@@ -172,8 +247,8 @@ export default new Vuex.Store({
           throw error;
         });
     },
-    postDocument({ commit }, { file, configuration }) {
-      return DocumentService.postDocument(file, configuration).then(response => {
+    postDocument({ commit }, { file, configuration, credentials }) {
+      return DocumentService.postDocument(file, configuration, credentials).then(response => {
         commit('SET_DOCUMENT_ID', response.data);
         commit('SET_DOCUMENT', null);
         commit('SET_DOCUMENT_TEXT', null);
@@ -183,6 +258,7 @@ export default new Vuex.Store({
         commit('setElementSelected', null);
         commit('setParentElementSelected', null);
         commit('setSelectedPage', 1);
+        commit('resetPagination');
         return response.data;
       });
     },
@@ -193,6 +269,12 @@ export default new Vuex.Store({
     },
   },
   getters: {
+    downloadLinks({ uuid }) {
+      return DocumentService.downloadLinks(uuid);
+    },
+    baseAPIUrl() {
+      return DocumentService.getAPIURL();
+    },
     currentPageElements(state) {
       try {
         return state.document.pages[state.selectedPage - 1].elements;
@@ -224,58 +306,11 @@ export default new Vuex.Store({
     fontInspectorSwitchState(state) {
       return state.expansionPanels.fontInspector;
     },
-    fontUsageRatio: state => fontId => {
-      const flattenElement = element => {
-        var flattend = [];
-        !(function flat(element) {
-          flattend.push(element);
-          if (element.content) {
-            element.content.forEach(function(el) {
-              flattend.push(el);
-              if (Array.isArray(el.content)) {
-                flat(el);
-              }
-            });
-          }
-        })(element);
-        return flattend;
-      };
-
-      const allWords = state.document.pages
-        .map(page => page.elements)
-        .reduce((prev, curr) => prev.concat(curr), [])
-        .map(flattenElement)
-        .reduce((prev, curr) => prev.concat(curr), [])
-        .filter(element => element.type == 'word');
-
-      const wordsWithFont = allWords.filter(w => w.font == fontId);
-
-      const allPageWords = state.document.pages
-        .filter(page => page.pageNumber === state.selectedPage)
-        .map(page => page.elements)
-        .reduce((prev, curr) => prev.concat(curr), [])
-        .map(flattenElement)
-        .reduce((prev, curr) => prev.concat(curr), [])
-        .filter(element => element.type == 'word');
-
-      const pageWordsWithFont = allPageWords.filter(w => w.font == fontId);
-
-      return {
-        documentRatio:
-          Number(wordsWithFont.length / allWords.length).toFixed(3) +
-          ' (' +
-          wordsWithFont.length +
-          '/' +
-          allWords.length +
-          ')',
-        pageRatio:
-          Number(pageWordsWithFont.length / allPageWords.length).toFixed(3) +
-          ' (' +
-          pageWordsWithFont.length +
-          '/' +
-          allPageWords.length +
-          ')',
-      };
+    fontUsageRatio(state) {
+      return state.fontUsageRatioCache;
+    },
+    pageMarginsFilter(state) {
+      return state.inspectorFilters.margins;
     },
   },
 });

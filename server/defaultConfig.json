@@ -1,8 +1,8 @@
 {
-  "version": 0.5,
+  "version": 0.9,
   "extractor": {
     "pdf": "pdfminer",
-    "img": "tesseract",
+    "ocr": "tesseract",
     "language": ["eng", "fra"]
   },
   "cleaner": [
@@ -45,6 +45,7 @@
       }
     ],
     "link-detection",
+    "image-detection",
     [
       "words-to-line",
       {
@@ -61,15 +62,25 @@
       }
     ],
     "heading-detection",
+    "heading-detection-dt",
     "list-detection",
+    "page-number-detection",
+    "hierarchy-detection",
     [
-      "page-number-detection",
+      "table-of-contents-detection",
       {
-        "ignorePages": [],
-        "maxMarginPercentage": 15
+        "keywords": [
+          "contents",
+          "index",
+          "table of contents",
+          "contenidos",
+          "indice",
+          "índice",
+          "tabla de contenidos"
+        ],
+        "pageKeywords": ["pagina", "page", "pag"]
       }
     ],
-    "hierarchy-detection",
     [
       "regex-matcher",
       {

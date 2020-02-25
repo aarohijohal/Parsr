@@ -1,9 +1,11 @@
 import axios from 'axios';
 
+const baseURL = process.env.VUE_APP_API
+  ? process.env.VUE_APP_API + '/api/v1'
+  : 'http://localhost:3001/api/v1';
+
 const apiClient = axios.create({
-  baseURL: process.env.VUE_APP_API
-    ? process.env.VUE_APP_API + '/api/v1'
-    : 'http://localhost:3001/api/v1',
+  baseURL: baseURL,
   withCredentials: false,
   headers: {},
   timeout: 10000,
@@ -21,6 +23,15 @@ export default {
       } else if (predicate(p, obj[p])) result.push(obj); // check condition
     }
     return result;
+  },
+  normalizeImagesSrc(markdown, docId) {
+    const regexp = /!\[\]\(assets_.{1,}\/img-(\d+).{1,}/g;
+    for (const matching of markdown.matchAll(regexp)) {
+      const url =
+        '![](' + baseURL + '/image/' + docId + '/' + parseInt(matching[1]).toString() + ')';
+      markdown = markdown.replace(matching[0], url);
+    }
+    return markdown;
   },
   normalizeWordsSpace(document) {
     var lines = this.search(document, function(key, value) {
@@ -62,6 +73,7 @@ export default {
     const formData = new FormData();
     formData.append('file', file, file.name);
     formData.append('config', configuration);
+
     return apiClient.post('/document', formData);
   },
   getDocumentStatus(docID) {
@@ -69,5 +81,16 @@ export default {
   },
   getDefaultConfiguration() {
     return apiClient.get('/default-config?specs=true');
+  },
+  getAPIURL() {
+    return baseURL;
+  },
+  downloadLinks(docID) {
+    return {
+      json: `${baseURL}/json/${docID}?download=1`,
+      markdown: `${baseURL}/markdown/${docID}?download=1`,
+      text: `${baseURL}/text/${docID}?download=1`,
+      csv: `${baseURL}/csv/${docID}?download=1`,
+    };
   },
 };

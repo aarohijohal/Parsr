@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { RotationCorrection } from '../../input/OcrExtractor';
 import { findMostCommonFont, isInBox } from '../../utils';
 import logger from '../../utils/Logger';
 import { BoundingBox } from './BoundingBox';
@@ -58,6 +59,7 @@ export class Page {
   private _box: BoundingBox;
   private _horizontalOccupancy: boolean[];
   private _verticalOccupancy: boolean[];
+  private _pageRotation: RotationCorrection;
 
   constructor(pageNumber: number, elements: Element[], boundingBox: BoundingBox) {
     this.pageNumber = pageNumber;
@@ -65,7 +67,7 @@ export class Page {
     this.box = boundingBox;
     this.horizontalOccupancy = [];
     this.verticalOccupancy = [];
-
+    this.pageRotation = null;
     this.computePageOccupancy();
   }
 
@@ -78,7 +80,7 @@ export class Page {
 
     const horizontalBarriers: number[][] = this.getBarriers('horizontal');
     horizontalBarriers.forEach(a => {
-      for (let i = Math.floor(a[0]); i !== Math.floor(a[1]) + 1; ++i) {
+      for (let i = Math.floor(a[0]); i <= Math.floor(a[1]) + 1; ++i) {
         if (!this.horizontalOccupancy[i]) {
           this.horizontalOccupancy[i] = true;
         }
@@ -86,7 +88,7 @@ export class Page {
     });
     const verticalBarriers: number[][] = this.getBarriers('vertical');
     verticalBarriers.forEach(a => {
-      for (let i = Math.floor(a[0]); i !== Math.floor(a[1]) + 1; ++i) {
+      for (let i = Math.floor(a[0]); i <= Math.floor(a[1]) + 1; ++i) {
         if (!this.verticalOccupancy[i]) {
           this.verticalOccupancy[i] = true;
         }
@@ -196,7 +198,8 @@ export class Page {
       this.elements.splice(index, 1);
     } else {
       logger.debug(
-        `--> Could not remove element id "${e.id}" in first level elements on page ${this.pageNumber}; it might be located deeper`,
+        `--> Could not remove element id "${e.id}" in first level elements on page \
+        ${this.pageNumber}; it might be located deeper`,
       );
     }
   }
@@ -279,6 +282,22 @@ export class Page {
    */
   public set box(value: BoundingBox) {
     this._box = value;
+  }
+
+  /**
+   * Setter PageRotation
+   * @param {RotationCorrection} value
+   */
+  public set pageRotation(value: RotationCorrection) {
+    this._pageRotation = value;
+  }
+
+  /**
+   * Getter PageRotation
+   * @return {RotationCorrection}
+   */
+  public get pageRotation(): RotationCorrection {
+    return this._pageRotation;
   }
 
   /**

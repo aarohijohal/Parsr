@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 AXA Group Operations S.A.
+ * Copyright 2020 AXA Group Operations S.A.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,11 +13,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { spawn } from 'child_process';
 import * as filetype from 'file-type';
 import * as fs from 'fs';
+import { DOMParser } from 'xmldom';
 import { BoundingBox, Document, Page, Word } from '../../types/DocumentRepresentation';
 import * as utils from '../../utils';
+import * as CommandExecuter from '../../utils/CommandExecuter';
 import logger from '../../utils/Logger';
 import { Module } from '../Module';
 
@@ -36,7 +37,10 @@ export class LinkDetectionModule extends Module {
     let mdLinks: JSON[] = [];
     const fileType: { ext: string; mime: string } = filetype(fs.readFileSync(doc.inputFile));
     if (fileType === null || fileType.ext !== 'pdf') {
-      logger.warn(`Warning: The input file ${doc.inputFile} is not a PDF (${utils.prettifyObject(fileType)}); not using meta information for link detection..`);
+      logger.warn(
+        `Warning: Input file ${doc.inputFile} is not a PDF (${utils.prettifyObject(fileType)}); \
+        not using meta info for link detection..`,
+      );
     } else {
       mdLinks = await this.extractLinksFromMetadata(doc.inputFile);
       mdLinks = mdLinks.map((link, id) => ({
@@ -68,11 +72,12 @@ export class LinkDetectionModule extends Module {
 
   private matchTextualLinks(word: Word) {
     const linkRegexp = /\b((http|https):\/\/?)[^\s()<>]+(?:\([\w\d]+\)|([^[:punct:]\s]|\/?))/;
+    // tslint:disable-next-line:max-line-length
     const mailRegexp = /^(("[\w-\s]+")|([\w-]+(?:\.[\w-]+)*)|("[\w-\s]+")([\w-]+(?:\.[\w-]+)*))(@((?:[\w-]+\.)*\w[\w-]{0,66})\.([a-z]{2,6}(?:\.[a-z]{2})?)$)|(@\[?((25[0-5]\.|2[0-4][0-9]\.|1[0-9]{2}\.|[0-9]{1,2}\.))((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[0-9]{1,2})\.){2}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[0-9]{1,2})\]?$)/;
     if (word.toString().match(linkRegexp)) {
-      word.properties.targetURL = word.toString();
+      word.properties.targetURL = word.toString().match(linkRegexp)[0];
     } else if (word.toString().match(mailRegexp)) {
-      word.properties.targetURL = `mailto:${word.toString()}`;
+      word.properties.targetURL = `mailto:${word.toString().match(mailRegexp)[0]}`;
     }
   }
 
@@ -81,47 +86,56 @@ export class LinkDetectionModule extends Module {
   */
   private getFileMetadata(pdfFilePath: string): Promise<any> {
     return new Promise((resolve, reject) => {
-      const xmlOutputFile: string = utils.getTemporaryFile('.xml');
-      const pythonLocation: string = utils.getPythonLocation();
-      const dumppdfLocation: string = utils.getDumppdfLocation();
-      if (dumppdfLocation === "" || pythonLocation === "") {
-        reject(`Could not find the necessary libraries..`);
-      }
-
-      logger.info(`Extracting metadata with pdfminer's dumppdf.py tool...`);
-
-      const dumppdfArguments = [dumppdfLocation, '-a', '-o', xmlOutputFile, pdfFilePath];
-
-      logger.debug(`${pythonLocation} ${dumppdfArguments.join(' ')}`);
-
-      if (!fs.existsSync(xmlOutputFile)) {
-        fs.appendFileSync(xmlOutputFile, '');
-      }
-
-      const dumppdf = spawn(pythonLocation, dumppdfArguments);
-
-      dumppdf.stderr.on('data', data => {
-        logger.error('dumppdf error:', data.toString('utf8'));
-        reject(data.toString('utf8'));
-      });
-
-      dumppdf.on('close', async code => {
-        if (code === 0) {
-          const xml: string = fs.readFileSync(xmlOutputFile, 'utf8');
+      CommandExecuter.dumpPdf(pdfFilePath)
+        .then(xmlOutputPath => {
+          const xml: string = fs.readFileSync(xmlOutputPath, 'utf8');
           try {
             logger.debug(`Converting dumppdf's XML output to JS object..`);
-            utils.parseXmlToObject(xml).then((obj: any) => {
+            const xmlStringSerialized = new DOMParser().parseFromString(xml, 'text/xml');
+            utils.parseXmlToObject(xmlStringSerialized).then((obj: any) => {
               resolve(obj);
             });
           } catch (err) {
             reject(`parseXml failed: ${err}`);
           }
-        } else {
-          reject(`dumppdf return code is ${code}`);
-        }
-      });
+        })
+        .catch(() => {
+          resolve();
+        });
     });
   }
+  /*private getFileMetadata_(pdfFilePath: string): Promise<any> {
+    return new Promise((resolve, reject) => {
+      logger.info(`Extracting metadata with pdfminer's dumppdf.py tool...`);
+      const xmlOutputFile: string = utils.getTemporaryFile('.xml');
+      const dumppdfArguments = ['-a', '-o', xmlOutputFile, pdfFilePath];
+
+      if (!fs.existsSync(xmlOutputFile)) {
+        fs.appendFileSync(xmlOutputFile, '');
+      }
+      CommandExecuter.run(CommandExecuter.COMMANDS.DUMPPDF, dumppdfArguments)
+        .then(() => {
+          const xml: string = fs.readFileSync(xmlOutputFile, 'utf8');
+          try {
+            logger.debug(`Converting dumppdf's XML output to JS object..`);
+            const xmlStringSerialized = new DOMParser().parseFromString(xml, 'text/xml');
+            utils.parseXmlToObject(xmlStringSerialized).then((obj: any) => {
+              resolve(obj);
+            });
+          } catch (err) {
+            reject(`parseXml failed: ${err}`);
+          }
+        })
+        .catch(({ found, error }) => {
+          logger.error(error);
+          if (!found) {
+            reject(`Could not find the necessary libraries..`);
+          } else {
+            reject(error);
+          }
+        });
+    });
+  }*/
 
   /*
     parses the JSON metadata given by dumppdf.py and returns only the matched links on each page
@@ -133,7 +147,9 @@ export class LinkDetectionModule extends Module {
         pdf: { object: objects },
       } = await this.getFileMetadata(file);
 
-      const pages = objects.filter(o => o.dict && o.dict[0].value.some(v => v.literal && v.literal.includes('Page')));
+      const pages = objects.filter(
+        o => o.dict && o.dict[0].value.some(v => v.literal && v.literal.includes('Page')),
+      );
       const pagesWithAnnots = pages.filter(o => o.dict && o.dict[0].key.includes('Annots'));
       pagesWithAnnots.forEach(pageObject => {
         const pageHeightIndex = pageObject.dict[0].key.indexOf('MediaBox');

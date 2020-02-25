@@ -20,7 +20,7 @@ You can install Parsr either using Docker containers, or directly on your machin
 
 Containers are already available on [Docker Hub](https://hub.docker.com/u/axarev).
 
-The documentation to build and run Docker containers is [here](docs/docker.md).
+The documentation to build and run Docker containers is [here](docker.md).
 
 ## 2. Bare-Metal Installation
 
@@ -31,8 +31,10 @@ Under a **Debian** based distribution:
 ```sh
 sudo add-apt-repository ppa:ubuntuhandbook1/apps
 sudo apt-get update
-sudo apt-get install nodejs npm qpdf imagemagick graphicsmagick python-pdfminer tesseract-ocr libtesseract-dev python3-tk ghostscript python3-pip
+sudo apt-get install nodejs npm qpdf imagemagick graphicsmagick tesseract-ocr libtesseract-dev python3-tk ghostscript python3-pip
 pip install camelot-py
+pip install numpy pillow scikit-image
+pip install pdfminer.six
 ```
 
 Under **Arch** Linux :
@@ -40,6 +42,7 @@ Under **Arch** Linux :
 ```sh
 pacman -S nodejs npm qpdf imagemagick graphicsmagick pdfminer tesseract python-pip
 pip install camelot-py
+pip install numpy pillow scikit-image
 ```
 
 ### 2.2. Installing Dependencies under MacOS
@@ -54,7 +57,7 @@ To install it, launch the following in a terminal
 Next, install the required dependencies:
 
 ```sh
-brew install node qpdf imagemagick graphicsmagick tesseract tesseract-lang
+brew install node qpdf imagemagick graphicsmagick tesseract tesseract-lang tcl-tk ghostscript
 ```
 
 To install the python based dependencies (pdfminer and camelot), install, first install `pip`:
@@ -68,10 +71,20 @@ and then the dependencies:
 
 ```sh
 pip install pdfminer.six
-pip install ghostscript camelot-py
+pip install camelot-py
+pip install numpy pillow scikit-image
 ```
 
 ### 2.3. Installing Dependencies under Windows
+
+The installation procedure for Parsr requires the command `where.exe` to be in the path.  
+Try typing `where` in the command prompt. If the command cannot be found, execute the following to add its location to PATH:
+
+```sh
+setx PATH "\$env:PATH;C:\Windows\System32" -m
+```
+
+Then,
 
 1. We recommend using [Chocolatey](https://chocolatey.org) as the package manager for installing dependencies under Windows. To install Chocolatey, [follow these instructions](https://chocolatey.org/install#installing-chocolatey).
 2. [Download and install **`node.js`**](https://nodejs.org/en/download)

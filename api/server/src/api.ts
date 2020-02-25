@@ -1,5 +1,5 @@
 /**
- * Copyright 2019 AXA Group Operations S.A.
+ * Copyright 2020 AXA Group Operations S.A.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+import archiver from 'archiver';
+import { exec, spawnSync } from 'child_process';
 import * as crypto from 'crypto';
 import express from 'express';
 import { Request, Response } from 'express-serve-static-core';
@@ -21,6 +23,7 @@ import * as fs from 'fs';
 import multer from 'multer';
 import * as os from 'os';
 import * as path from 'path';
+import dependencies from './dependencies.json';
 import { FileManager } from './FileManager';
 import logger from './Logger';
 import { ProcessManager } from './ProcessManager';
@@ -46,6 +49,8 @@ export class ApiServer {
   });
 
   private allowedMimetypes: string[] = [
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
+    'message/rfc822', // .eml
     'application/pdf',
     'application/xml',
     'text/xml',
@@ -87,15 +92,83 @@ export class ApiServer {
     v1_0.get('/xml/:id', this.handleGetXml.bind(this));
     // TODO add every other endpoint
     v1_0.get('/thumbnail/:id/:page', this.handleGetThumb.bind(this));
-
+    v1_0.get('/image/:docId/:imageId', this.handleGetImage.bind(this));
     // server info endpoints
     v1_0.get('/default-config', this.handleGetDefaultConfig.bind(this));
     v1_0.get('/modules', this.handleGetModules.bind(this));
     v1_0.get('/module-config/:modulename', this.handleGetModuleConfig.bind(this));
 
+    v1_0.get('/check-installation', this.handleCheckInstallation.bind(this));
+
     app.listen(port, () => {
       logger.info(`Api listening on port ${port}!`);
     });
+  }
+
+  private handleCheckInstallation(req: Request, res: Response): void {
+    const response = `
+    <style>
+      table,
+      th,
+      td {
+        text-align: left;
+        border: 1px solid black;
+      }
+      .found {
+        background: lightgreen;
+      }
+      .not.found {
+        background: red;
+      }
+    </style>
+    <table>
+      <tr>
+        <th>Dependency name</th>
+        <th>Found?</th>
+        <th>Required?</th>
+        <th>Path</th>
+      </tr>
+    `;
+    const whereIs = os.platform() === 'win32' ? 'where' : 'which';
+    const result = dependencies.required.concat(dependencies.optional).map(
+      (group: any) =>
+        (group as string[])
+          .map(name => {
+            const { status, stdout } = spawnSync(whereIs, [`${name}`]);
+            return {
+              name,
+              found: status === 0,
+              path: status === 0 ? stdout.toString() : '',
+              required: dependencies.required.includes(group),
+            };
+          })
+          .find(g => g.found) || {
+          name: group[0],
+          found: false,
+          path: '',
+          required: dependencies.required.includes(group),
+        },
+    );
+
+    res
+      .type('html')
+      .send(
+        response.concat(
+          result
+            .map(
+              r =>
+                `<tr>
+            <td>${r.name}</td>
+            <td class="${r.found ? 'found' : 'not found'}">${r.found ? 'YES' : 'NO'}</td>
+            <td>${r.required ? 'YES' : 'NO'}</td>
+            <td>${r.path || '-'}</td>
+          </tr>`,
+            )
+            .join(''),
+          '</table>',
+        ),
+      )
+      .end();
   }
 
   /**
@@ -297,20 +370,47 @@ export class ApiServer {
     }
   }
 
-  private handleGetCsvList(req: Request, res: Response) {
+  private async handleGetCsvList(req: Request, res: Response) {
     res.setHeader('Access-Control-Allow-Origin', '*');
     const docId: string = req.params.id;
     try {
+      const fileName = this.fileManager.getBinder(docId).name;
       const folder: string = this.fileManager.getFilePath(docId, 'csvs');
-      const paths: string[] = fs.readdirSync(folder).map(filename => {
-        const match = filename.match(/-(\d+)-(\d+)\.csv$/);
-        return `${req.baseUrl}/csv/${docId}/${match[1]}/${match[2]}`;
-      });
-
-      res.json(paths);
+      const filesInFolder = fs.readdirSync(folder);
+      let paths: string[] = [];
+      if (req.query.download) {
+        paths = filesInFolder.map(this.fileToLocalPath(docId)).filter(fs.existsSync);
+        if (paths.length > 0) {
+          const zipFile = await this.compress(paths, fileName.concat('.csv'));
+          res.download(zipFile);
+        } else {
+          res.end();
+        }
+      } else {
+         paths = filesInFolder.map(this.fileToDownloadURI(docId, req.baseUrl));
+         res.json(paths);
+      }
     } catch (err) {
       res.status(404).send(err.stack);
     }
+  }
+
+  private fileToLocalPath(docId: string): (file: string) => string {
+    return (file: string) => {
+      const match = file.match(/-(\d+)-(\d+)\.csv$/);
+      return this.fileManager.getCsvFilePath(
+        docId,
+        parseInt(match[1], 10),
+        parseInt(match[2], 10),
+      );
+    };
+  }
+
+  private fileToDownloadURI(docId: string, baseUrl: string): (file: string) => string {
+    return (file: string) => {
+      const match = file.match(/-(\d+)-(\d+)\.csv$/);
+      return `${baseUrl}/csv/${docId}/${match[1]}/${match[2]}`;
+    };
   }
 
   private handleGetMarkdown(req: Request, res: Response) {
@@ -321,15 +421,55 @@ export class ApiServer {
     this.handleGetFile(req, res, 'xml');
   }
 
-  private handleGetFile(req: Request, res: Response, type: SingleFileType): void {
+  private async handleGetFile(req: Request, res: Response, type: SingleFileType): Promise<void> {
     res.setHeader('Access-Control-Allow-Origin', '*');
 
     try {
-      const file: string = this.fileManager.getFilePath(req.params.id, type);
-      res.sendFile(file);
+      let file: string = this.fileManager.getFilePath(req.params.id, type);
+      if (req.query.download && type === 'markdown') {
+        const fileName = this.fileManager.getBinder(req.params.id).name;
+        const assetsFolder = path.join(path.dirname(file), `assets_${fileName}`);
+        const filesToCompress = [file, assetsFolder].filter(fs.existsSync);
+        if (filesToCompress.length > 1) {
+          file = await this.compress(filesToCompress, fileName.concat('.md'));
+        }
+      }
+      req.query.download ? res.download(file) : res.sendFile(file);
     } catch (err) {
       res.status(404).send(err.stack);
     }
+  }
+
+  /**
+   * puts all files and folders in files array into a compressed zip file and returns it's path
+   * @param files array of paths with files and folders to compress.
+   *  The path to the first file on this array will be used as the .zip output path
+   * @param zipFileName name of the compressed zip file to generate
+   * @return path to the compressed zip file
+   */
+  private compress(files: string[], zipFileName: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+      try {
+        const zipPath = zipFileName.concat('.zip');
+        const outputZip = fs.createWriteStream(zipPath);
+        outputZip.on('close', () => {
+          resolve(zipPath);
+        });
+        const archive = archiver('zip', { zlib: { level: 0 } });
+        archive.pipe(outputZip);
+        files.forEach(f => {
+          const stats = fs.statSync(f);
+          if (stats.isFile()) {
+            archive.file(f, { name: path.basename(f) });
+          } else {
+            archive.directory(f, f.split(path.sep).pop());
+          }
+        });
+        archive.finalize();
+      } catch (error) {
+        reject(error);
+      }
+    });
   }
 
   private handleRoot(req: Request, res: Response): void {
@@ -342,12 +482,54 @@ export class ApiServer {
     `);
   }
 
+  private handleGetImage(req: Request, res: Response) {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    const docId: string = req.params.docId;
+    const imageName: string = 'img-' + req.params.imageId.padStart(4, '0') + '.';
+    const binder: Binder = this.fileManager.getBinder(docId);
+    const assetsFolder = binder.outputPath + '/assets_' + binder.name;
+    if (!fs.existsSync(assetsFolder)) {
+      res.sendStatus(404);
+      return;
+    }
+    const paths: string[] = fs
+      .readdirSync(assetsFolder)
+      .filter(filename => {
+        return path.basename(filename).startsWith(imageName);
+      })
+      .map(file => assetsFolder + '/' + file);
+
+    if (paths.length > 0) {
+      logger.info('Return image at path ' + paths[0]);
+      res.sendFile(paths[0], {
+        headers: {
+          responseType: 'blob',
+        },
+      });
+    } else {
+      res.sendStatus(404);
+    }
+  }
+
   private handleGetThumb(req: Request, res: Response) {
     res.setHeader('Access-Control-Allow-Origin', '*');
 
     const docId: string = req.params.id;
     const page: number = parseInt(req.params.page, 10) + 1;
     const binder: Binder = this.fileManager.getBinder(docId);
+
+    const filetype = require('file-type');
+
+    // if its an .eml, we have to change the binder extension to match the generated PDF
+    // in Email Extractor and get the thumbnails of that PDF file
+    ['.eml', '.docx'].forEach(ext => {
+      if (binder.input.endsWith(ext)) {
+        binder.input = binder.input.replace(ext, '-tmp.pdf');
+      }
+    });
+
+    const fileType: { ext: string; mime: string } = filetype(fs.readFileSync(binder.input));
+
     const thumbFolder = path.join(os.tmpdir(), 'Doc-' + docId + '/');
 
     if (!fs.existsSync(thumbFolder)) {
@@ -369,26 +551,53 @@ export class ApiServer {
       });
       return;
     }
-    const pdf2Pic = require('pdf2pic');
-    const pdf2picConfig = new pdf2Pic({
-      density: 72, // output pixels per inch
-      savename: docId, // output file name
-      savedir: thumbFolder, // output file location
-      format: 'png', // output file format
-      size: '200x200', // output size in pixels
-    });
+    let convert;
 
-    try {
-      pdf2picConfig.convertBulk(binder.input, [page]).then(() => {
-        logger.info('Generated Thumbnail at path ' + filePath);
-        res.sendFile(filePath, {
-          headers: {
-            responseType: 'blob',
-          },
+    if (fileType.mime.startsWith('image')) {
+      const command = this.getCommandLocationOnSystem('magick convert', 'convert');
+      if (command) {
+        convert = new Promise((resolve, reject) => {
+          exec([command, '-resize', '200x200\\>', binder.input, filePath].join(' '), err => {
+            if (err) {
+              return reject(err);
+            }
+            return resolve();
+          });
         });
+      } else {
+        convert = Promise.reject(
+          'Cannot find ImageMagick convert tool. Are you sure it is installed?',
+        );
+      }
+    } else if (fileType.ext === 'pdf') {
+      const pdf2Pic = require('pdf2pic');
+      const pdf2picConfig = new pdf2Pic({
+        density: 72, // output pixels per inch
+        savename: docId, // output file name
+        savedir: thumbFolder, // output file location
+        format: 'png', // output file format
+        size: '200x200', // output size in pixels
       });
-    } catch (error) {
-      res.status(500).send(error);
+      convert = pdf2picConfig.convertBulk(binder.input, [page]);
+    }
+
+    if (convert) {
+      try {
+        convert
+          .then(() => {
+            logger.info('Generated Thumbnail at path ' + filePath);
+            res.sendFile(filePath, {
+              headers: {
+                responseType: 'blob',
+              },
+            });
+          })
+          .catch((error: string) => {
+            res.status(500).send(error);
+          });
+      } catch (error) {
+        res.status(500).send(error);
+      }
     }
   }
 
@@ -421,5 +630,36 @@ export class ApiServer {
 
   private getUUID(): string {
     return crypto.randomBytes(15).toString('hex');
+  }
+
+  /**
+   * returns the location of the executable locator command on the current system.
+   * on linux/unix machines, this is 'which', on windows machines, it is 'where'.
+   */
+  private getExecLocationCommandOnSystem(): string {
+    return os.platform() === 'win32' ? 'where' : 'which';
+  }
+
+  /**
+   * returns the location of a command on a system.
+   * @param firstChoice the first choice name of the executable to be located
+   * @param secondChoice the second choice name of the executable to be located
+   * @param thirdChoice the third choice name of the executable to be located
+   */
+  private getCommandLocationOnSystem(
+    firstChoice: string,
+    secondChoice: string = '',
+    thirdChoice: string = '',
+  ): string {
+    const cmdComponents: string[] = firstChoice.split(' ');
+    const info = spawnSync(this.getExecLocationCommandOnSystem(), [cmdComponents[0]]);
+    const result = info.status === 0 ? info.stdout.toString().split(os.EOL)[0] : null;
+    if (result === null && secondChoice !== '') {
+      return this.getCommandLocationOnSystem(secondChoice, thirdChoice);
+    }
+    if (result === null) {
+      return null;
+    }
+    return firstChoice;
   }
 }

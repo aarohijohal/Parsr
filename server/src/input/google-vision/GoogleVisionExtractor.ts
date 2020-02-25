@@ -1,4 +1,6 @@
 import * as vision from '@google-cloud/vision';
+import { writeFileSync } from 'fs';
+import { Config } from '../../types/Config';
 import {
   BoundingBox,
   Character,
@@ -10,7 +12,9 @@ import {
   Paragraph,
   Word,
 } from '../../types/DocumentRepresentation';
-import { Extractor } from '../Extractor';
+import { getTemporaryFile } from '../../utils';
+import { OcrExtractorFactory } from '../OcrExtractor';
+import * as credentials from './credentials.json';
 
 type GoogleVisionResponse = Array<{
   fullTextAnnotation: FullTextAnnotation;
@@ -104,17 +108,29 @@ type TextAnnotation = {
 /**
  * An extractor class to extract content from images using Google Vision
  */
-export class GoogleVisionExtractor extends Extractor {
-  /**
-   * Runs the extraction process, first setting page dimensions, then extracting the document itself.
-   * @param inputFile The name of the image to be used at input for the extraction.
-   * @returns The promise of a valid Document (as per the Document Representation namespace).
-   */
-  public run(inputFile: string): Promise<Document> {
-    return this.execute(inputFile);
+export class GoogleVisionExtractor extends OcrExtractorFactory {
+
+  constructor(config: Config) {
+    super(config, credentials);
+    this.checkCredentials([
+      "auth_provider_x509_cert_url",
+      "auth_uri",
+      "client_email",
+      "client_id",
+      "client_x509_cert_url",
+      "private_key",
+      "private_key_id",
+      "project_id",
+      "token_uri",
+      "type",
+    ]);
+
+    const filePath = getTemporaryFile('.json');
+    writeFileSync(filePath, JSON.stringify(this.config.extractor.credentials));
+    process.env.GOOGLE_APPLICATION_CREDENTIALS = filePath;
   }
 
-  private async execute(inputFile: string) {
+  public async scanImage(inputFile: string) {
     const client = new vision.ImageAnnotatorClient();
     const result: GoogleVisionResponse = await client.documentTextDetection(inputFile);
 
@@ -192,13 +208,10 @@ export class GoogleVisionExtractor extends Extractor {
         elements,
         new BoundingBox(0, 0, gPage.width, gPage.height),
       );
-
       pages.push(page);
     });
 
-    const doc: Document = new Document(pages);
-
-    return doc;
+    return new Document(pages, inputFile);
   }
 
   private googleBoxToParsrBox(box: GoogleVisionBoundingBox): BoundingBox {

@@ -1,4 +1,19 @@
-import * as child_process from 'child_process';
+/**
+ * Copyright 2020 AXA Group Operations S.A.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 import * as filetype from 'file-type';
 import * as fs from 'fs';
 import {
@@ -11,6 +26,7 @@ import {
   Word,
 } from '../../types/DocumentRepresentation';
 import * as utils from '../../utils';
+import * as CommandExecuter from '../../utils/CommandExecuter';
 import logger from '../../utils/Logger';
 import { Module } from '../Module';
 import * as defaultConfig from './defaultConfig.json';
@@ -30,11 +46,11 @@ export interface TableExtractorResult {
 }
 
 export interface TableExtractor {
-  readTables(inputFile: string, options: Options): TableExtractorResult;
+  readTables(inputFile: string, options: Options): Promise<TableExtractorResult>;
 }
 
 const defaultExtractor: TableExtractor = {
-  readTables(inputFile: string, options: Options): TableExtractorResult {
+  async readTables(inputFile: string, options: Options): Promise<TableExtractorResult> {
     let pages: string = 'all';
     let flavor: string = 'lattice';
     const lineScale: string = '70';
@@ -49,43 +65,25 @@ const defaultExtractor: TableExtractor = {
       flavor = options.flavor;
     }
 
-    // find python executable name
-    const pythonLocation: string = utils.getPythonLocation();
-    if (pythonLocation === '') {
-      return {
-        stdout: '',
-        stderr: 'Unable to find python on the system. Are you sure it is installed?',
-        status: 10,
-      };
-    }
-
-    const scriptArgs = [
-      __dirname + '/../../../assets/TableDetectionScript.py',
+    return CommandExecuter.detectTables(
       inputFile,
       flavor,
       lineScale,
       pages,
-    ];
-
-    if ((options.table_areas || []).length > 0) {
-      scriptArgs.push(options.table_areas.join(';'));
-    }
-
-    const tableExtractor = child_process.spawnSync(pythonLocation, scriptArgs);
-
-    if (!tableExtractor.stdout || !tableExtractor.stderr) {
-      return {
-        stdout: '',
-        stderr: 'Unable to run python script. Are you sure camelot-py[cv] is installed?',
-        status: 10,
-      };
-    }
-
-    return {
-      stdout: tableExtractor.stdout.toString(),
-      stderr: tableExtractor.stderr.toString(),
-      status: tableExtractor.status,
-    };
+      options.table_areas || [],
+    )
+      .then(stdout => ({
+        stdout,
+        stderr: '',
+        status: 0,
+      }))
+      .catch(({ error }) => {
+        return {
+          stdout: '',
+          stderr: error,
+          status: 1,
+        };
+      });
   },
 };
 
@@ -93,33 +91,29 @@ export class TableDetectionModule extends Module<Options> {
   public static moduleName = 'table-detection';
   private extractor: TableExtractor;
 
-  constructor(options?: Options, tableExtractor: TableExtractor = defaultExtractor) {
+  constructor(options?: Options) {
     super(options, defaultOptions);
-    this.extractor = tableExtractor;
+    this.setExtractor(defaultExtractor);
   }
 
-  public main(doc: Document): Document {
+  public setExtractor(extractor: TableExtractor) {
+    this.extractor = extractor;
+  }
+
+  public async main(doc: Document): Promise<Document> {
     const fileType: { ext: string; mime: string } = filetype(fs.readFileSync(doc.inputFile));
     if (fileType === null || fileType.ext !== 'pdf') {
-      logger.warn(
-        `Warning: The input file ${doc.inputFile} is not a PDF; Not performing table detection.`,
-      );
+      logger.warn(`Input file ${doc.inputFile} is not a PDF; Not performing table detection.`);
       return doc;
     }
     if (doc.getElementsOfType<Table>(Table).length !== 0) {
-      logger.warn(
-        'Warning: document already has tables extracted by the extractor. Not performing table detection.',
-      );
+      logger.warn('Document already has tables. Not performing table detection.');
       return doc;
     }
 
     try {
-      if (fs.existsSync(doc.inputFile)) {
-        logger.info(`Attempting table detection on ${doc.inputFile}..`);
-      } else {
-        logger.warn(
-          `Warning: The configured input filename ${doc.inputFile} cannot be found. Not performing table detection.`,
-        );
+      if (!fs.existsSync(doc.inputFile)) {
+        logger.warn(`Input file ${doc.inputFile} cannot be found. Not performing table detection.`);
         return doc;
       }
     } catch (err) {
@@ -127,17 +121,14 @@ export class TableDetectionModule extends Module<Options> {
       return doc;
     }
 
-    this.options.runConfig.forEach((config, n) => {
-      const tableExtractor = this.extractor.readTables(doc.inputFile, config);
-      if (tableExtractor.status !== 0) {
-        logger.error(`there was a problem executing table config no. ${n + 1}: ${JSON.stringify(config)}`);
-        logger.error(tableExtractor.stderr);
-      } else {
+    for (const config of this.options.runConfig) {
+      const tableExtractor = await this.extractor.readTables(doc.inputFile, config);
+      if (tableExtractor.status === 0) {
         const tablesData = JSON.parse(tableExtractor.stdout);
         this.addTables(tablesData, doc);
         this.removeWordsUsedInCells(doc);
       }
-    });
+    }
     return doc;
   }
 
@@ -170,18 +161,27 @@ export class TableDetectionModule extends Module<Options> {
       mergeCandidateCells[cellRow].forEach(cellColGroup => {
         let cellSubGroup = [cellColGroup[0]];
         for (let i = 0; i < cellColGroup.length; i += 1) {
-          const expectedTextInSubGroup =
-            cellSubGroup.map(cellCol => tableData[cellRow][cellCol].trim()).join(' ').trim();
+          const expectedTextInSubGroup = cellSubGroup
+            .map(cellCol => tableData[cellRow][cellCol].trim())
+            .join(' ')
+            .trim();
 
-          const tableContentSubGroup: TableCell[] =
-            tableContent[cellRow].content.filter((_, index) => cellSubGroup.includes(index));
-          const subgroupText = tableContentSubGroup.map(cell => cell.toString().trim()).join(' ').trim();
+          const tableContentSubGroup: TableCell[] = tableContent[
+            cellRow
+          ].content.filter((_, index) => cellSubGroup.includes(index));
+          const subgroupText = tableContentSubGroup
+            .map(cell => cell.toString().trim())
+            .join(' ')
+            .trim();
 
           if (expectedTextInSubGroup === subgroupText) {
             groupsToMerge.push(cellSubGroup);
           }
 
-          if (subgroupText.length > expectedTextInSubGroup.length || expectedTextInSubGroup === subgroupText) {
+          if (
+            subgroupText.length > expectedTextInSubGroup.length ||
+            expectedTextInSubGroup === subgroupText
+          ) {
             cellSubGroup = [];
           }
 
@@ -235,7 +235,8 @@ export class TableDetectionModule extends Module<Options> {
       For now groups with only one value are not considered (possible vertical join or string encoding problem)
     */
     Object.keys(mergeCandidateCells).forEach(nRow => {
-      mergeCandidateCells[nRow] = utils.groupConsecutiveNumbersInArray(mergeCandidateCells[nRow])
+      mergeCandidateCells[nRow] = utils
+        .groupConsecutiveNumbersInArray(mergeCandidateCells[nRow])
         .filter(group => group.length > 1);
       if (mergeCandidateCells[nRow].length === 0) {
         delete mergeCandidateCells[nRow];
@@ -326,7 +327,9 @@ export class TableDetectionModule extends Module<Options> {
   }
 
   private wordsInCellBox(cellBounds: BoundingBox, pageWords: Word[]): Word[] {
-    return pageWords.filter(w => (BoundingBox.getOverlap(w.box, cellBounds).box1OverlapProportion > 0.80));
+    return pageWords.filter(
+      w => BoundingBox.getOverlap(w.box, cellBounds).box1OverlapProportion > 0.8,
+    );
   }
 
   private removeWordsUsedInCells(document: Document) {

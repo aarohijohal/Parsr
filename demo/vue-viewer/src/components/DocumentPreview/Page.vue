@@ -7,52 +7,98 @@
       :width="page.box.w"
       :height="page.box.h"
     >
-      <!--text x="10" y="20" fill="red">
-				Debug Info: Page {{ page.pageNumber }} - Viewer Zoom {{ zoom }} - Page Zoom to fit
-				{{ zoomToFitPage }}
-			</text-->
-      <!--pageElements
-				v-for="element in page.elements"
-				:key="element.id"
-				:element="element"
-				:fonts="fonts"
-			/-->
-      <heading
-        v-for="element in elementsOfType('heading')"
-        :key="element.id"
-        :element="element"
-        :fonts="fonts"
-        @custom-event="elementSelected"
-      />
-      <paragraph
-        v-for="element in elementsOfType('paragraph')"
-        :key="element.id"
-        :element="element"
-        :fonts="fonts"
-        @custom-event="elementSelected"
-      />
-      <tableData
-        v-for="element in elementsOfType('table')"
-        :key="element.id"
-        :element="element"
-        :fonts="fonts"
-        @custom-event="elementSelected"
-      />
-      <list
-        v-for="element in elementsOfType('list')"
-        :key="element.id"
-        :element="element"
-        :fonts="fonts"
-        @custom-event="elementSelected"
-      />
-      <!--component
-				v-for="element in page.elements"
-				:functional="true"
-				:is="componentFor(element)"
-				:key="element.id"
-				:element="element"
-				:fonts="fonts"
-			></component-->
+      <svg v-show="pageMarginsFilter">
+        <line
+          stroke-dasharray="5,5"
+          :x1="page.margins.left"
+          :y1="0"
+          :x2="page.margins.left"
+          :y2="page.box.h"
+          style="stroke: #aeaeae"
+        />
+        <line
+          stroke-dasharray="5,5"
+          :x1="page.margins.right"
+          :y1="0"
+          :x2="page.margins.right"
+          :y2="page.box.h"
+          style="stroke: #aeaeae"
+        />
+        <line
+          stroke-dasharray="5,5"
+          :x1="0"
+          :y1="page.margins.top"
+          :x2="page.box.w"
+          :y2="page.margins.top"
+          style="stroke: #aeaeae"
+        />
+        <line
+          stroke-dasharray="5,5"
+          :x1="0"
+          :y1="page.margins.bottom"
+          :x2="page.box.w"
+          :y2="page.margins.bottom"
+          style="stroke: #aeaeae"
+        />
+      </svg>
+      <g
+        :style="{
+          transform:
+            'translateX(' +
+            page.rotation.translation.x +
+            'px) translateY(' +
+            page.rotation.translation.y +
+            'px) rotate(' +
+            page.rotation.degrees +
+            'deg)',
+          transformOrigin: page.rotation.origin.x + 'px ' + page.rotation.origin.y + 'px',
+        }"
+      >
+        <imageData
+          v-for="element in images"
+          :key="element.id"
+          :element="element"
+          :fonts="fonts"
+          :documentId="documentId"
+          :apiURL="baseAPIUrl"
+          @custom-event="elementSelected"
+        />
+        <heading
+          v-for="element in headings"
+          :key="`heading_${element.id}`"
+          :element="element"
+          :fonts="fonts"
+          @custom-event="elementSelected"
+        />
+        <paragraph
+          v-for="element in paragraphs"
+          :key="`paragraph_${element.id}`"
+          :element="element"
+          :fonts="fonts"
+          @custom-event="elementSelected"
+        />
+        <tableData
+          v-for="element in tables"
+          :key="`table_${element.id}`"
+          :element="element"
+          :fonts="fonts"
+          @custom-event="elementSelected"
+        />
+        <list
+          v-for="element in lists"
+          :key="`list_${element.id}`"
+          :element="element"
+          :fonts="fonts"
+          @custom-event="elementSelected"
+        />
+        <table-of-contents
+          v-for="element in toc"
+          :key="`toc_${element.id}`"
+          :element="element"
+          :fonts="fonts"
+          @custom-event="elementSelected"
+        />
+      </g>
     </svg>
   </div>
 </template>
@@ -63,12 +109,16 @@ import scrollItemMixin from '@/mixins/scrollItemMixin.js';
 import Paragraph from '@/components/DocumentPreview/Paragraph';
 import Heading from '@/components/DocumentPreview/Heading';
 import TableData from '@/components/DocumentPreview/Table';
+import TableOfContents from '@/components/DocumentPreview/TableOfContents';
 import List from '@/components/DocumentPreview/List';
+import ImageData from '@/components/DocumentPreview/Image';
+import { mapState, mapGetters } from 'vuex';
 export default {
-  components: { Paragraph, Heading, TableData, List },
+  components: { Paragraph, Heading, TableData, List, ImageData, TableOfContents },
   mixins: [scrollItemMixin],
   data() {
     return {
+      elementsOfType: {},
       containerSize: { width: 0, height: 0 },
       zoomToFitPage: 1.0,
       appeared: false,
@@ -90,8 +140,27 @@ export default {
     },
   },
   computed: {
-    elementsOfType() {
-      return elementType => this.pageElements.filter(element => element.type === elementType);
+    ...mapGetters(['baseAPIUrl', 'pageMarginsFilter']),
+    ...mapState({
+      documentId: state => state.uuid,
+    }),
+    headings() {
+      return this.elementsOfType['heading'] || [];
+    },
+    paragraphs() {
+      return this.elementsOfType['paragraph'] || [];
+    },
+    tables() {
+      return this.elementsOfType['table'] || [];
+    },
+    lists() {
+      return this.elementsOfType['list'] || [];
+    },
+    images() {
+      return this.elementsOfType['image'] || [];
+    },
+    toc() {
+      return this.elementsOfType['table-of-contents'] || [];
     },
     pageElements() {
       if (!this.appeared) {
@@ -169,7 +238,6 @@ export default {
     this.container.style.width = parseFloat(this.containerSize.width) * this.zoom + 'px';
   },
   mounted: function() {
-    this.$store.commit('setElementSelected', null);
     this.$nextTick(function() {
       var style = window.getComputedStyle(this.scroll);
       this.containerSize = { width: parseFloat(style.width), height: parseFloat(style.height) };
@@ -179,6 +247,19 @@ export default {
     this.onAppear('PageContainer_' + this.page.pageNumber, 0.1, () => {
       this.appeared = true;
     });
+  },
+  watch: {
+    'pageElements.length': {
+      handler() {
+        this.elementsOfType = {};
+        this.pageElements.forEach(element => {
+          if (!this.elementsOfType[element.type]) {
+            this.elementsOfType[element.type] = [];
+          }
+          this.elementsOfType[element.type].push(element);
+        });
+      },
+    },
   },
 };
 </script>
@@ -213,6 +294,10 @@ export default {
   cursor: pointer;
   fill: red !important;
 }
+.Page rect.Image {
+  fill: fuchsia !important;
+}
+
 .VisibleWords rect.Word {
   fill: transparent;
   stroke: rgb(0, 124, 12);
@@ -253,6 +338,11 @@ g.TableContainer text {
 .VisibleLists rect.List {
   fill: transparent;
   stroke: orange;
+  stroke-width: 1;
+}
+
+.VisibleTOC rect.TOC {
+  stroke: purple;
   stroke-width: 1;
 }
 </style>
